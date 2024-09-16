@@ -22,10 +22,7 @@ train_args = {
     'worker': 1,
     'cuda': True,
     'cuda_device': 0,
-    # 'write_stream': False,
-    # 'write_recon_frame': False,
-    # 'recon_bin_path': "recon_bin_path",
-    # 'output_json_result_path': "required_value",  # Replace with actual required value
+    # 'output_json_result_path': "required_value",  
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
@@ -150,8 +147,6 @@ class Trainer(Module):
         frame_prior_rate: R(zt)
     """
     loss_setting2output_obj = {
-        # "x_tilde_dist": "x_tilde_dist",
-        # "x_hat_dist": "x_hat_dist",
         "mv_latent_rate": "bpp_mv_z",
         "mv_prior_rate": "bpp_mv_y",
         "frame_latent_rate": "bpp_z",
@@ -167,91 +162,18 @@ class Trainer(Module):
 
 
     def training_step(self, batch, batch_idx):
-        # config = progressive_training_schedule(self.current_epoch)
-        # lr = config["lr"]
-        # nframes = config["nframes"]
-        # objective = config["loss"]
-        # use_avg_loss = config["avg_loss"]
-        # mode = config["mode"]
         self.schedule()
         
-        # self.use_weighted_loss = True if nframes >= 5 else False
-        
-        # q = random.randint(0, 3) if not self.single else self.quality_index
-
-        # # Set Optimizers
-        # opt = self.optimizers()
-        # opt._optimizer.param_groups[0]["lr"] = lr
-
-        # Batch: [B, T, C, H, W]
-        # seq_len = batch.shape[1]
-        # frames = [image.squeeze(1) for image in batch.chunk(seq_len, 1)][:nframes]
-
-        # # I frame compression
-        # with torch.no_grad():
-        #     x_hat
-        #     x_hat = self.i_frame_model(frames[0], q_in_ckpt=True, q_index=q)["x_hat"]
-        #     dpb = {
-        #         "ref_frame": x_hat,
-        #         "ref_feature": None,
-        #         "ref_mv_feature": None,
-        #         "ref_y": None,
-        #         "ref_mv_y": None,
-        #     }
-
-        # # Iterative Update
-        # if mode == "inter":
-        #     step = self.p_frame_model.forward_inter
-        # elif mode == "recon":
-        #     step = self.p_frame_model.forward_recon
-        # elif mode == "all":
-        #     step = self.p_frame_model.forward_all
-        # else:
-        #     raise NotImplementedError
-
-        # total_psnr = AverageMeter()
-        # total_bpp = AverageMeter()
-        # total_mse = AverageMeter()
-        # total_loss = AverageMeter()
-
-        avg_loss = 0
-        for i in range(nframes - 1):
-            # (x, dpb, q_index, frame_idx):
-            out_net = step(frames[i + 1], dpb, q_index=q, frame_idx=i)
-            dpb = out_net["dpb"]
-            
-            out_criterion = self.loss(
-                out_net,
-                frames[i + 1],
-                q_index=q,
-                objective=objective,
-                frame_idx=i,
-            )
-
-            if not use_avg_loss:
-                opt.zero_grad()
-                self.manual_backward(out_criterion["loss"])
-                self.clip_gradients(
-                    opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm"
-                )
-                opt.step()
-                # All the information in dpb are freed
-                if nframes >= 3:
-                    for k in dpb.keys():
-                        dpb[k] = dpb[k].detach()
-                        
         ref_frame = None
-        frame_types = [] # 看过 h264 后理解，用于记录帧类型（I、P），给出解码顺序
+        # frame_types = [] # 看过 h264 后理解，用于记录帧类型（I、P），给出解码顺序
         qualitys = [] # PSNR 或 MS-SSIM，给出每帧的压缩？质量
-        bits = [] # 对于 I 帧，记录 bit.item()；对于 P 帧，bpp.item()*frame_pixel_num。即每帧的比特数
-        bits_mv_y = [] # mv应该是运动向量，y 是？
-        bits_mv_z = []
-        bits_y = [] # y、z 是？
-        bits_z = []
-
-        # gop_size = args_dict['gop'] # 固定的 GOP 大小？
+        # bits = [] # 对于 I 帧，记录 bit.item()；对于 P 帧，bpp.item()*frame_pixel_num。即每帧的比特数
+        # bits_mv_y = [] 
+        # bits_mv_z = []
+        # bits_y = [] 
+        # bits_z = []
         frame_pixel_num = 0 
-        frame_num = args_dict['frame_num'] # 在 main 计算得到
+        frame_num = args_dict['frame_num']
 
         for frame_idx in range(frame_num):
             # 读取一帧
@@ -261,7 +183,7 @@ class Trainer(Module):
                              f"im{str(frame_idx+1).zfill(padding)}.png"))
             ori_frame = ori_frame.to(self.device) # 保证设备一致
 
-            if frame_pixel_num == 0: # frame_pixel_num 只初始化一次
+            if frame_pixel_num == 0:
                 frame_pixel_num = ori_frame.shape[2]*ori_frame.shape[3] # shape 为 [batch, channel, height, width]， 见 read_frame_to_torch 
             else: # 每帧 比较前后帧尺寸（保证一致）
                 assert(frame_pixel_num == ori_frame.shape[2]*ori_frame.shape[3])
@@ -308,91 +230,5 @@ class Trainer(Module):
     def validation_step(self, batch, batch_idx):
         with torch.no_grad():
             pass
-            # nframes = 5
-            # objective = ["mv_rate", "x_rate", "x_dist"]
-            # self.use_weighted_loss = True if nframes >= 5 else False
 
-            # for q in range(4):
-            #     # Set Optimizers
-            #     # Batch: [B, T, C, H, W]
-            #     seq_len = batch.shape[1]
-            #     frames = [image.squeeze(1) for image in batch.chunk(seq_len, 1)]
-            #     recon_frames = []
-
-            #     # I frame compression
-            #     # (x, q_in_ckpt=False, q_index=None):
-            #     x_hat = self.i_frame_model(frames[0], q_in_ckpt=True, q_index=q)[
-            #         "x_hat"
-            #     ]
-            #     dpb = {
-            #         "ref_frame": x_hat,
-            #         "ref_feature": None,
-            #         "ref_mv_feature": None,
-            #         "ref_y": None,
-            #         "ref_mv_y": None,
-            #     }
-            #     recon_frames.append(x_hat)
-
-            #     # Iterative Update
-            #     step = self.p_frame_model.forward_all
-
-            #     total_psnr = AverageMeter()
-            #     total_bpp = AverageMeter()
-            #     total_mse = AverageMeter()
-            #     total_loss = AverageMeter()
-
-            #     for i in range(nframes - 1):
-            #         # (x, dpb, q_index, frame_idx):
-            #         out_net = step(frames[i + 1], dpb, q_index=q, frame_idx=(i))
-            #         out_criterion = self.loss(
-            #             out_net,
-            #             frames[i + 1],
-            #             q_index=q,
-            #             objective=objective,
-            #             frame_idx=i,
-            #         )
-
-            #         dpb = out_net["dpb"]
-            #         recon_frames.append(dpb["ref_frame"])
-
-            #         total_psnr.update(out_criterion["psnr"].item())
-            #         total_bpp.update(out_criterion["bpp"].item())
-            #         total_mse.update(out_criterion["mse"].item())
-            #         total_loss.update(out_criterion["loss"].item())
-
-            #     self.log_dict(
-            #         {
-            #             f"val_avg_psnr/q{q}": total_psnr.avg,
-            #             f"val_avg_bpp/q{q}": total_bpp.avg,
-            #             f"val_avg_mse/q{q}": total_mse.avg,
-            #             f"val_avg_loss/q{q}": total_loss.avg,
-            #         },
-            #         sync_dist=True,
-            #     )
-
-            #     if batch_idx == 2:
-            #         self.log_images(
-            #             {
-            #                 f"val_x_ori/q{q}": torch.cat(frames, dim=0),
-            #                 f"val_x_recon/q{q}": torch.cat(recon_frames, dim=0),
-            #             },
-            #             batch_idx
-            #         )
-
-    # def configure_optimizers(self):
-    #     parameters = {n for n, p in self.p_frame_model.named_parameters()}
-    #     params_dict = dict(self.p_frame_model.named_parameters())
-
-    #     optimizer = optim.AdamW(
-    #         (params_dict[n] for n in sorted(parameters)),
-    #         lr=1e-4,  # default
-    #     )
-    #     # optimizer = optim.Adam(
-    #     #     (params_dict[n] for n in sorted(parameters)),
-    #     #     lr=1e-4,  # default
-    #     # )
-
-    #     return {
-    #         "optimizer": optimizer,
-    #     }
 
