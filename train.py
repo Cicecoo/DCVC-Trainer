@@ -90,15 +90,21 @@ class Trainer(Module):
         if self.current_epoch < borders_of_steps[0]:
             step = 0
             name = "me"
-        elif self.current_epoch < borders_of_steps[1]:
+        elif self.current_epoch == borders_of_steps[0]:
             step = 1
             name = "reconstruction"
-        elif self.current_epoch < borders_of_steps[2]:
+            # 冻结光流网络
+            for param in self.video_net.opticFlow.parameters():
+                param.requires_grad
+
+        elif self.current_epoch == borders_of_steps[1]:
             step = 2
             name = "contextual_coding"
-        else:
+        elif self.current_epoch == borders_of_steps[2]:
             step = 3
             name = "all"
+            for param in self.video_net.opticFlow.parameters():
+                param.requires_grad
         self.current_step = step
         loss_settings = dict()
         loss_settings["step"] = step
