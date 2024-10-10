@@ -1,8 +1,16 @@
 DCVC/
+DVC/
+
 src/
 media/
 checkpoints/
 assets/
+runs/
+
+__pycache__/
+wandb/
+
 
 make_graph.py
+run
 # test_video.py
