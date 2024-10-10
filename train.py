@@ -11,6 +11,7 @@ from test_video import PSNR, ms_ssim, read_frame_to_torch
 from dvc_dataset import DataSet
 
 import wandb
+import matplotlib.pyplot as plt
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",
@@ -96,8 +97,13 @@ class Trainer(Module):
             # 冻结光流网络
             for param in self.video_net.opticFlow.parameters():
                 param.requires_grad
-
+        elif self.current_epoch < borders_of_steps[1]:
+            step = 1
+            name = "reconstruction"
         elif self.current_epoch == borders_of_steps[1]:
+            step = 2
+            name = "contextual_coding"
+        elif self.current_epoch < borders_of_steps[2]:
             step = 2
             name = "contextual_coding"
         elif self.current_epoch == borders_of_steps[2]:
@@ -105,6 +111,9 @@ class Trainer(Module):
             name = "all"
             for param in self.video_net.opticFlow.parameters():
                 param.requires_grad
+        else:
+            step = 3
+            name = "all"
         self.current_step = step
         loss_settings = dict()
         loss_settings["step"] = step
@@ -190,36 +199,69 @@ class Trainer(Module):
         ref_image = ref_image.to(self.device)
         output = self.video_net.forward(referframe=ref_image, input_image=input_image)
 
-        loss = self.loss(output, ref_image)
+        loss = self.loss(output, input_image)
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
         if train_args['model_type'] == 'psnr':
-            quality = PSNR(output['recon_image'], ref_image)
+            quality = PSNR(output['recon_image'], input_image)
         else:
-            quality = ms_ssim(output['recon_image'], ref_image, data_range=1.0).item()
+            quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
         return loss, quality
 
 
     # TODO
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, img_idx, output_folder):
         input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
+        input_image = input_image.to(self.device)
+        ref_image = ref_image.to(self.device)
         with torch.no_grad():
             output = self.video_net.forward(referframe=ref_image, input_image=input_image)
-            loss = self.loss(output, ref_image)
+            # loss = self.loss(output, ref_image)
+            loss = self.loss(output, input_image)
 
             # TODO 可视化
+            visualization(self, self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
-                quality = PSNR(output['recon_image'], ref_image)
+                quality = PSNR(output['recon_image'], input_image)
             else:
-                quality = ms_ssim(output['recon_image'], ref_image, data_range=1.0).item()
+                quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
         return loss, quality
 
+def visualization(self, epoch, net_input_image, net_output_image, img_idx, output_folder):
+    # 为每个权重创建一个与权重文件名相同的文件夹
+    vis_folder = os.path.join(output_folder, f"model_epoch_{epoch}_visuals")
+    if not os.path.exists(vis_folder):
+        os.makedirs(vis_folder, exist_ok=True)
+
+    # 保存可视化图像
+    self.save_visualization(net_input_image, net_output_image, epoch, img_idx, vis_folder)
+
+def save_visualization(self, input_image, output_image, epoch, img_idx, vis_folder):
+    # 转换图像为可显示格式
+    input_image_np = input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+    output_image_np = output_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+
+    # 创建图像对比图
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+    
+    ax[0].imshow(input_image_np)
+    ax[0].set_title('Input Image')
+    ax[0].axis('off')
+
+    ax[1].imshow(output_image_np)
+    ax[1].set_title('Reconstructed Image')
+    ax[1].axis('off')
+
+    # 保存图片到新建的与权重同名的文件夹
+    img_save_path = os.path.join(vis_folder, f'validation_{epoch}_{img_idx}.png')
+    plt.savefig(img_save_path)
+    plt.close(fig)
 
 if __name__ == "__main__":
     save_folder = "runs/"
@@ -242,7 +284,9 @@ if __name__ == "__main__":
 
     trainer = Trainer(train_args)
     dataset = DataSet()
+    val_dataset = DataSet('H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val.txt')
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=train_args['worker'])
     for epoch in range(12):
         trainer.current_epoch = epoch
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(dataloader):
@@ -252,6 +296,13 @@ if __name__ == "__main__":
             wandb.log({"epoch": epoch, "batch": batch_idx})
             
         print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
+        # trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx, save_folder)
+        idx = 0
+        for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(val_dataloader):
+            loss, quality = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
+            idx += 1
+            wandb.log({"val_loss": loss, "val_quality": quality})
+            # wandb.log({"epoch": epoch, "batch": batch_idx})
 
         # save model
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))

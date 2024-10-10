@@ -4,7 +4,7 @@
 
 1. 拉取 https://github.com/microsoft/DCVC
 
-2. 将 test_video.py 和 dvc_dataset.py 放入 DCVC/DCVC
+2. 将 train.py、test_video.py 和 dvc_dataset.py 放入 DCVC/DCVC
 
 3. 将 https://github.com/ZhihaoHu/PyTorchVideoCompression/ 的 DVC 文件夹放入 DCVC/DCVC
 
