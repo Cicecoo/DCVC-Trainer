@@ -12,6 +12,7 @@ from dvc_dataset import DataSet
 
 import wandb
 import matplotlib.pyplot as plt
+import numpy as np
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",
@@ -66,6 +67,10 @@ class Trainer(Module):
         self.i_frame_net = architectures[args['i_frame_model_name']].from_state_dict(i_frame_load_checkpoint).eval()
 
         self.video_net = DCVC_net()
+
+        # mv_checkpoint = torch.load("checkpoints/model_dcvc_quality_0_psnr.pth", map_location=torch.device('cpu'))
+        # self.video_net.opticFlow.load_state_dict(mv_checkpoint)
+
         if args['resume']:
             load_checkpoint = torch.load(args['dcvc_model_path'], map_location=torch.device('cpu'))
             self.video_net.load_dict(load_checkpoint)
@@ -224,7 +229,7 @@ class Trainer(Module):
             loss = self.loss(output, input_image)
 
             # TODO 可视化
-            visualization(self, self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
+            self.visualization(self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
                 quality = PSNR(output['recon_image'], input_image)
@@ -233,35 +238,39 @@ class Trainer(Module):
 
         return loss, quality
 
-def visualization(self, epoch, net_input_image, net_output_image, img_idx, output_folder):
-    # 为每个权重创建一个与权重文件名相同的文件夹
-    vis_folder = os.path.join(output_folder, f"model_epoch_{epoch}_visuals")
-    if not os.path.exists(vis_folder):
-        os.makedirs(vis_folder, exist_ok=True)
+    def visualization(self, epoch, net_input_image, net_output_image, img_idx, output_folder):
+        # 为每个权重创建一个与权重文件名相同的文件夹
+        vis_folder = os.path.join(output_folder, f"model_epoch_{epoch}_visuals")
+        if not os.path.exists(vis_folder):
+            os.makedirs(vis_folder, exist_ok=True)
 
-    # 保存可视化图像
-    self.save_visualization(net_input_image, net_output_image, epoch, img_idx, vis_folder)
+        # 保存可视化图像
+        self.save_visualization(net_input_image, net_output_image, epoch, img_idx, vis_folder)
 
-def save_visualization(self, input_image, output_image, epoch, img_idx, vis_folder):
-    # 转换图像为可显示格式
-    input_image_np = input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
-    output_image_np = output_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+    def save_visualization(self, input_image, output_image, epoch, img_idx, vis_folder):
+        # 转换图像为可显示格式
+        input_image_np = input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+        output_image_np = output_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
 
-    # 创建图像对比图
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    
-    ax[0].imshow(input_image_np)
-    ax[0].set_title('Input Image')
-    ax[0].axis('off')
+        # 反归一化
+        input_image_np = (input_image_np * 255).astype(np.uint8)    
+        output_image_np = (output_image_np * 255).astype(np.uint8)
 
-    ax[1].imshow(output_image_np)
-    ax[1].set_title('Reconstructed Image')
-    ax[1].axis('off')
+        # 创建图像对比图
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        
+        ax[0].imshow(input_image_np)
+        ax[0].set_title('Input Image')
+        ax[0].axis('off')
 
-    # 保存图片到新建的与权重同名的文件夹
-    img_save_path = os.path.join(vis_folder, f'validation_{epoch}_{img_idx}.png')
-    plt.savefig(img_save_path)
-    plt.close(fig)
+        ax[1].imshow(output_image_np)
+        ax[1].set_title('Reconstructed Image')
+        ax[1].axis('off')
+
+        # 保存图片到新建的与权重同名的文件夹
+        img_save_path = os.path.join(vis_folder, f'validation_{epoch}_{img_idx}.png')
+        plt.savefig(img_save_path)
+        plt.close(fig)
 
 if __name__ == "__main__":
     save_folder = "runs/"

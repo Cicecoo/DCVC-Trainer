@@ -16,12 +16,12 @@ out_channel_mv = 128
 out_channel_N = 64  
 out_channel_M = 96
 
-vimeo_data_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/sequences/'
+vimeo_data_path = '' # 'H:/Data/vimeo_septuplet/vimeo_septuplet/sequences/''../../../../../../mnt/h/Data/vimeo_septuplet/vimeo_septuplet/sequences/'
 vimeo_test_list_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test.txt'
 
 class DataSet(data.Dataset):
     def __init__(self, path=vimeo_test_list_path, im_height=256, im_width=256):
-        self.image_input_list, self.image_ref_list = self.get_vimeo(filefolderlist=path)
+        self.image_input_list, self.image_ref_list = self.get_vimeo(rootdir='H:/Data/vimeo_septuplet/vimeo_septuplet/sequences/', filefolderlist=path)
         self.im_height = im_height
         self.im_width = im_width
         
@@ -31,7 +31,7 @@ class DataSet(data.Dataset):
         print("dataset find image: ", len(self.image_input_list))
 
     # TODO: 改为使用全部数据？
-    def get_vimeo(self, rootdir=vimeo_data_path, filefolderlist=vimeo_test_list_path):
+    def get_vimeo(self, rootdir, filefolderlist):
         with open(filefolderlist) as f:
             data = f.readlines()
             
@@ -40,6 +40,7 @@ class DataSet(data.Dataset):
 
         for n, line in enumerate(data, 1):
             y = os.path.join(rootdir, line.rstrip())
+            # print(y)
             fns_train_input += [y]
             refnumber = int(y[-5:-4]) - 2
             refname = y[0:-5] + str(refnumber) + '.png'
