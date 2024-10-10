@@ -1,8 +1,0 @@
-{
-    "HEVC_B": {
-        "base_path": ".\\media\\data\\HEVC_B",
-        "sequences": {
-            "BasketballDrive_1920x1024_50": {"frames":  100, "gop":  10}
-        }
-    }
-}
