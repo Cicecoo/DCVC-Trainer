@@ -13,6 +13,7 @@ from dvc_dataset import DataSet
 import wandb
 import matplotlib.pyplot as plt
 import numpy as np
+import torch.nn as nn
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",
@@ -33,11 +34,12 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # 3、4、5、6
     "gop": 10,
+    "epochs": 20,
 }
 
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [1, 4, 7]  
+borders_of_steps = [1, 10, 15]  
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -71,6 +73,52 @@ class Trainer(Module):
         # mv_checkpoint = torch.load("checkpoints/model_dcvc_quality_0_psnr.pth", map_location=torch.device('cpu'))
         # self.video_net.opticFlow.load_state_dict(mv_checkpoint)
 
+        dcvc_checkpoint = torch.load(args['dcvc_model_path'], map_location=torch.device('cpu'))
+        self.video_net.load_state_dict(dcvc_checkpoint)
+
+        # self.video_net.bitEstimator_z
+        # self.video_net.bitEstimator_z_mv
+        # self.video_net.feature_extract
+        # self.video_net.context_refine
+        # self.video_net.gaussian_encoder
+        # self.video_net.mvEncoder
+        # self.video_net.mvDecoder_part1
+        # self.video_net.mvDecoder_part2
+        # self.video_net.contextualEncoder
+        # self.video_net.contextualDecoder_part1
+        # self.video_net.contextualDecoder_part2 
+        # self.video_net.priorEncoder
+        # self.video_net.priorDecoder
+        # self.video_net.mvpriorEncoder
+        # self.video_net.mvpriorDecoder
+        # self.video_net.entropy_parameters 
+        # self.video_net.auto_regressive_mv
+        # self.video_net.entropy_parameters_mv 
+        # self.video_net.temporalPriorEncoder 
+        # self.video_net.opticFlow
+
+        for name, module in self.video_net.named_modules():
+            # print("name: ", name)
+            # 跳过 opticFlow 模块
+            if 'opticFlow' not in name:
+                if hasattr(module, 'reset_parameters'):
+                    module.reset_parameters()  # 使用 reset_parameters 函数重置参数
+                else:
+                    # 如果模块没有 reset_parameters 方法，可以自定义初始化
+                    for param in module.parameters():
+                        if param.dim() > 1:
+                            nn.init.xavier_uniform_(param)  # 使用 Xavier 初始化
+                        else:
+                            nn.init.zeros_(param)  # 偏置参数初始化为 0
+                print(f"reset {name}")
+            else:
+                print(f"skip {name}")
+                pass
+            #     exit(0)
+
+        # print("not skip")
+        # exit(0)
+            
         if args['resume']:
             load_checkpoint = torch.load(args['dcvc_model_path'], map_location=torch.device('cpu'))
             self.video_net.load_dict(load_checkpoint)
@@ -236,7 +284,7 @@ class Trainer(Module):
             else:
                 quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
-        return loss, quality
+        return loss, quality, output['bpp']
 
     def visualization(self, epoch, net_input_image, net_output_image, img_idx, output_folder):
         # 为每个权重创建一个与权重文件名相同的文件夹
@@ -249,23 +297,26 @@ class Trainer(Module):
 
     def save_visualization(self, input_image, output_image, epoch, img_idx, vis_folder):
         # 转换图像为可显示格式
+        ref_image_np = ref_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
         input_image_np = input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
         output_image_np = output_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
 
         # 反归一化
+        ref_image_np = (ref_image_np * 255).astype(np.uint8)
         input_image_np = (input_image_np * 255).astype(np.uint8)    
         output_image_np = (output_image_np * 255).astype(np.uint8)
 
         # 创建图像对比图
-        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        
-        ax[0].imshow(input_image_np)
-        ax[0].set_title('Input Image')
+        fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        ax[0].imshow(ref_image_np)
+        ax[0].set_title('Reference Image')
         ax[0].axis('off')
-
-        ax[1].imshow(output_image_np)
-        ax[1].set_title('Reconstructed Image')
+        ax[1].imshow(input_image_np)
+        ax[1].set_title('Input Image')
         ax[1].axis('off')
+        ax[2].imshow(output_image_np)
+        ax[2].set_title('Output Image')
+        ax[2].axis('off')
 
         # 保存图片到新建的与权重同名的文件夹
         img_save_path = os.path.join(vis_folder, f'validation_{epoch}_{img_idx}.png')
@@ -296,7 +347,7 @@ if __name__ == "__main__":
     val_dataset = DataSet('H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val.txt')
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=train_args['worker'])
-    for epoch in range(12):
+    for epoch in range(train_args['epochs']):
         trainer.current_epoch = epoch
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(dataloader):
             loss, quality = trainer.training_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx)
@@ -307,11 +358,21 @@ if __name__ == "__main__":
         print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
         # trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx, save_folder)
         idx = 0
+        losses = []
+        qualities = []
+        bpps = []
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(val_dataloader):
-            loss, quality = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
+            loss, quality, bpp = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
             idx += 1
-            wandb.log({"val_loss": loss, "val_quality": quality})
-            # wandb.log({"epoch": epoch, "batch": batch_idx})
+            losses.append(loss)
+            qualities.append(quality)
+            bpps.append(bpp)
+        
+        loss = sum(losses) / len(losses)
+        quality = sum(qualities) / len(qualities)
+        bpp = sum(bpps) / len(bpps)
+        wandb.log({"val_loss": loss, "val_quality": quality, "val_bpp": bpp})
+        wandb.log({"val_epoch": epoch})
 
         # save model
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
