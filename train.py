@@ -35,9 +35,8 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # 3、4、5、6
     "gop": 10,
-    "epochs": 20,
+    "epochs": 40,
 }
-
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = [10, 20, 30]  
@@ -230,7 +229,7 @@ class Trainer(Module):
         else:
             quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
-        return loss, quality
+        return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
 
 
     # TODO
@@ -244,14 +243,17 @@ class Trainer(Module):
             loss = self.loss(output, input_image)
 
             # TODO 可视化
-            self.visualization(self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
+            if epoch < borders_of_steps[0]:
+                self.visualization(self.current_epoch, input_image, output['x_tilde'], img_idx, output_folder)
+            else:
+                self.visualization(self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
                 quality = PSNR(output['recon_image'], input_image)
             else:
                 quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
-        return loss, quality, output['bpp']
+        return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
 
     def visualization(self, epoch, net_input_image, net_output_image, img_idx, output_folder):
         # 为每个权重创建一个与权重文件名相同的文件夹
@@ -317,29 +319,43 @@ if __name__ == "__main__":
     for epoch in range(train_args['epochs']):
         trainer.current_epoch = epoch
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(dataloader):
-            loss, quality = trainer.training_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx)
+            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx)
             
             wandb.log({"loss": loss, "quality": quality})
             wandb.log({"epoch": epoch, "batch": batch_idx})
+            wandb.log({"bpp_mv_y": bpp_mv_y, "bpp_mv_z": bpp_mv_z, "bpp_y": bpp_y, "bpp_z": bpp_z, "bpp": bpp})
             
         print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
         # trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx, save_folder)
         idx = 0
         losses = []
         qualities = []
+        bpp_mv_ys = []
+        bpp_mv_zs = []
+        bpp_ys = []
+        bpp_zs = []
         bpps = []
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(val_dataloader):
-            loss, quality, bpp = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
+            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
             idx += 1
             losses.append(loss)
             qualities.append(quality)
+            bpp_mv_ys.append(bpp_mv_y)
+            bpp_mv_zs.append(bpp_mv_z)
+            bpp_ys.append(bpp_y)
+            bpp_zs.append(bpp_z)
             bpps.append(bpp)
         
-        loss = sum(losses) / len(losses)
-        quality = sum(qualities) / len(qualities)
-        bpp = sum(bpps) / len(bpps)
-        wandb.log({"val_loss": loss, "val_quality": quality, "val_bpp": bpp})
-        wandb.log({"val_epoch": epoch})
+        ave_loss = sum(losses) / len(losses)
+        ave_quality = sum(qualities) / len(qualities)
+        ave_bpp_mv_y = sum(bpp_mv_ys) / len(bpp_mv_ys) 
+        ave_bpp_mv_z = sum(bpp_mv_zs) / len(bpp_mv_zs)
+        ave_bpp_y = sum(bpp_ys) / len(bpp_ys)
+        ave_bpp_z = sum(bpp_zs) / len(bpp_zs)
+        ave_bpp = sum(bpps) / len(bpps)
+
+        wandb.log({"val_loss": ave_loss, "val_quality": ave_quality, "epoch": epoch})
+        wandb.log({"val_bpp_mv_y": ave_bpp_mv_y, "val_bpp_mv_z": ave_bpp_mv_z, "val_bpp_y": ave_bpp_y, "val_bpp_z": ave_bpp_z, "val_bpp": ave_bpp, "epoch": epoch})
 
         # save model
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
