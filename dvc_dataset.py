@@ -42,8 +42,8 @@ class DataSet(data.Dataset):
             y = os.path.join(rootdir, line.rstrip())
             # print(y)
             fns_train_input += [y]
-            # refnumber = int(y[-5:-4]) - 2
-            refnumber = int(y[-5:-4]) - 1
+            refnumber = int(y[-5:-4]) - 2
+            # refnumber = int(y[-5:-4]) - 1
             refname = y[0:-5] + str(refnumber) + '.png'
             fns_train_ref += [refname]
 

@@ -14,7 +14,7 @@ import wandb
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
-from utils import load_submodule_params, freeze_submodule, unfreeze_submodule
+from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, get_save_folder
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",
@@ -199,12 +199,15 @@ class Trainer(Module):
     }
 
     def loss(self, net_output, target):
+        # 失真
         # warmup 时需要只获取运动补偿输出
         if self.loss_settings["D-item"] == "x_tilde_dist":
             D_item = F.mse_loss(net_output["x_tilde"], target) # x_tilde 取自 DCVC_net 的 motioncompensation
         else:
             D_item = F.mse_loss(net_output["recon_image"], target)
         loss = lambda_set[self.metric][self.quality_index] * D_item
+
+        # 率
         for component in self.loss_settings["components"]:
             loss += net_output[self.loss_setting2output_obj[component]]
         loss = self.loss_settings["lr"] * loss
@@ -225,33 +228,36 @@ class Trainer(Module):
         self.optimizer.step()
 
         if train_args['model_type'] == 'psnr':
-            quality = PSNR(output['recon_image'], input_image)
-        else:
-            quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
+            if self.current_step == 0:
+                quality = PSNR(output['x_tilde'], input_image)
+            else:
+                quality = PSNR(output['recon_image'], input_image)
+        # else:
+        #     quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
         return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
 
-
-    # TODO
     def validation_step(self, batch, img_idx, output_folder):
         input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
         input_image = input_image.to(self.device)
         ref_image = ref_image.to(self.device)
         with torch.no_grad():
             output = self.video_net.forward(referframe=ref_image, input_image=input_image)
-            # loss = self.loss(output, ref_image)
             loss = self.loss(output, input_image)
 
-            # TODO 可视化
+            # 可视化
             if epoch < borders_of_steps[0]:
                 self.visualization(self.current_epoch, input_image, output['x_tilde'], img_idx, output_folder)
             else:
                 self.visualization(self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
-                quality = PSNR(output['recon_image'], input_image)
-            else:
-                quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
+                if self.current_step == 0:
+                    quality = PSNR(output['x_tilde'], input_image)
+                else:
+                    quality = PSNR(output['recon_image'], input_image)
+            # else:
+            #     quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
 
         return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
 
@@ -292,31 +298,20 @@ class Trainer(Module):
         plt.savefig(img_save_path)
         plt.close(fig)
 
-if __name__ == "__main__":
-    save_folder = "runs/"
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder)
-
-    # 检测并按序号新建文件夹 train0, train1, ...
-    sub_dir_name = "train"
-    # 检查当前目录下是否有 train0, train1, ... 文件夹
-    sub_dir_index = 0
-    while os.path.exists(os.path.join(save_folder, sub_dir_name + str(sub_dir_index))):
-        sub_dir_index += 1
-    # 新建文件夹
-    sub_dir_name = sub_dir_name + str(sub_dir_index)
-    save_folder = os.path.join(save_folder, sub_dir_name)
-    os.makedirs(save_folder)
-
+if __name__ == "__main__": 
     wandb.init(project="DCVC-Trainer")
     wandb.config.update(train_args)
+
+    save_folder = get_save_folder()
 
     trainer = Trainer(train_args)
     dataset = DataSet()
     val_dataset = DataSet('H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val.txt')
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=train_args['worker'])
+
     for epoch in range(train_args['epochs']):
+        # 训练
         trainer.current_epoch = epoch
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(dataloader):
             loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx)
@@ -326,7 +321,8 @@ if __name__ == "__main__":
             wandb.log({"bpp_mv_y": bpp_mv_y, "bpp_mv_z": bpp_mv_z, "bpp_y": bpp_y, "bpp_z": bpp_z, "bpp": bpp})
             
         print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
-        # trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx, save_folder)
+
+        # 验证
         idx = 0
         losses = []
         qualities = []
