@@ -14,6 +14,7 @@ import wandb
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
+from utils import load_submodule_params, freeze_submodule, unfreeze_submodule
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",
@@ -39,7 +40,7 @@ train_args = {
 
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [1, 10, 15]  
+borders_of_steps = [10, 20, 30]  
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -58,76 +59,33 @@ lambda_set = {
     }
 }
 
+
 class Trainer(Module):
     def __init__(self, args):
         super().__init__()
-        # 模型
+        # 加载 cheng2020-anchor 模型
         i_frame_load_checkpoint = torch.load(
             args['i_frame_model_path'][args['i_frame_model_index']], 
             map_location=torch.device('cpu')
             )
         self.i_frame_net = architectures[args['i_frame_model_name']].from_state_dict(i_frame_load_checkpoint).eval()
 
+        # 加载 DCVC 模型
         self.video_net = DCVC_net()
-
-        # mv_checkpoint = torch.load("checkpoints/model_dcvc_quality_0_psnr.pth", map_location=torch.device('cpu'))
-        # self.video_net.opticFlow.load_state_dict(mv_checkpoint)
-
-        dcvc_checkpoint = torch.load(args['dcvc_model_path'], map_location=torch.device('cpu'))
-        self.video_net.load_state_dict(dcvc_checkpoint)
-
-        # self.video_net.bitEstimator_z
-        # self.video_net.bitEstimator_z_mv
-        # self.video_net.feature_extract
-        # self.video_net.context_refine
-        # self.video_net.gaussian_encoder
-        # self.video_net.mvEncoder
-        # self.video_net.mvDecoder_part1
-        # self.video_net.mvDecoder_part2
-        # self.video_net.contextualEncoder
-        # self.video_net.contextualDecoder_part1
-        # self.video_net.contextualDecoder_part2 
-        # self.video_net.priorEncoder
-        # self.video_net.priorDecoder
-        # self.video_net.mvpriorEncoder
-        # self.video_net.mvpriorDecoder
-        # self.video_net.entropy_parameters 
-        # self.video_net.auto_regressive_mv
-        # self.video_net.entropy_parameters_mv 
-        # self.video_net.temporalPriorEncoder 
-        # self.video_net.opticFlow
-
-        for name, module in self.video_net.named_modules():
-            # print("name: ", name)
-            # 跳过 opticFlow 模块
-            if 'opticFlow' not in name:
-                if hasattr(module, 'reset_parameters'):
-                    module.reset_parameters()  # 使用 reset_parameters 函数重置参数
-                else:
-                    # 如果模块没有 reset_parameters 方法，可以自定义初始化
-                    for param in module.parameters():
-                        if param.dim() > 1:
-                            nn.init.xavier_uniform_(param)  # 使用 Xavier 初始化
-                        else:
-                            nn.init.zeros_(param)  # 偏置参数初始化为 0
-                print(f"reset {name}")
-            else:
-                print(f"skip {name}")
-                pass
-            #     exit(0)
-
-        # print("not skip")
-        # exit(0)
-            
         if args['resume']:
             load_checkpoint = torch.load(args['dcvc_model_path'], map_location=torch.device('cpu'))
             self.video_net.load_dict(load_checkpoint)
+        else:
+            # 仅加载光流网络
+            load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
 
+        # 加载到 gpu
         self.device = torch.device("cuda" if args['cuda'] else "cpu")
         self.i_frame_net.to(self.device)
         self.i_frame_net.eval()
         self.video_net.to(self.device)
 
+        # 优化器
         self.optimizer = optim.Adam(self.video_net.parameters(), lr=1e-4)
 
         # 超参数
@@ -135,10 +93,20 @@ class Trainer(Module):
         self.quality_index = args['quality']
         self.gop = args['gop']
 
-        # 
+        # 初始化
         self.current_epoch = 0
         self.current_step = 0
         self.loss_settings = dict()
+        self.freeze_list = [self.video_net.opticFlow,
+                            self.video_net.mvEncoder,
+                            self.video_net.mvpriorEncoder,
+                            self.video_net.mvpriorDecoder, # 是否需要?
+                            self.video_net.auto_regressive_mv,
+                            self.video_net.entropy_parameters_mv,
+                            self.video_net.mvDecoder_part1,
+                            self.video_net.mvDecoder_part2,
+                            self.video_net.bitEstimator_z_mv
+                            ]
     
     def schedule(self):
         if self.current_epoch < borders_of_steps[0]:
@@ -148,8 +116,7 @@ class Trainer(Module):
             step = 1
             name = "reconstruction"
             # 冻结光流网络
-            for param in self.video_net.opticFlow.parameters():
-                param.requires_grad
+            freeze_submodule(self.freeze_list)
         elif self.current_epoch < borders_of_steps[1]:
             step = 1
             name = "reconstruction"
@@ -162,8 +129,8 @@ class Trainer(Module):
         elif self.current_epoch == borders_of_steps[2]:
             step = 3
             name = "all"
-            for param in self.video_net.opticFlow.parameters():
-                param.requires_grad
+            # 解冻光流网络
+            unfreeze_submodule(self.freeze_list)
         else:
             step = 3
             name = "all"
