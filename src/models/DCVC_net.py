@@ -183,13 +183,14 @@ class DCVC_net(nn.Module):
 
         # http://content.sniklaus.com/github/pytorch-spynet/network-sintel-final.pytorch
 
-    def motioncompensation(self, ref, mv): # 运动补偿
+    def motioncompensation(self, ref, mv): # 运动补偿 
+        # 渐进训练 step1 的 x tilde, 不应该经过 feature extractor？
+        x_tilde = flow_warp(ref, mv) 
+
         ref_feature = self.feature_extract(ref) # 对应原文 feature extractor
         prediction_init = flow_warp(ref_feature, mv) # 此warp应该不是原文提到的warp？ 光流场变换：将参考帧的特征图根据光流场变换到当前帧
         context = self.context_refine(prediction_init)
 
-        # 渐进训练 step1 的 x tilde, 不应该经过 feature extractor？
-        x_tilde = flow_warp(ref, mv) 
         return context, x_tilde
 
     def mv_refine(self, ref, mv):

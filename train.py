@@ -35,11 +35,11 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # 3、4、5、6
     "gop": 10,
-    "epochs": 40,
+    "epochs": 30,
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [10, 20, 30]  
+borders_of_steps = [5, 15, 25]  
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -94,7 +94,6 @@ class Trainer(Module):
 
         # 初始化
         self.current_epoch = 0
-        self.current_step = 0
         self.loss_settings = dict()
         self.freeze_list = [self.video_net.opticFlow,
                             self.video_net.mvEncoder,
@@ -106,66 +105,48 @@ class Trainer(Module):
                             self.video_net.mvDecoder_part2,
                             self.video_net.bitEstimator_z_mv
                             ]
+        self.step = None
+        self.step_name = None
     
     def schedule(self):
-        if self.current_epoch < borders_of_steps[0]:
-            step = 0
-            name = "me"
+        if self.current_epoch == 0:
+            self.step = 1
+            self.step_name = 'me'
         elif self.current_epoch == borders_of_steps[0]:
-            step = 1
-            name = "reconstruction"
-            # 冻结光流网络
+            self.step = 2
+            self.step_name = "reconstruction"
             freeze_submodule(self.freeze_list)
-        elif self.current_epoch < borders_of_steps[1]:
-            step = 1
-            name = "reconstruction"
         elif self.current_epoch == borders_of_steps[1]:
-            step = 2
-            name = "contextual_coding"
-        elif self.current_epoch < borders_of_steps[2]:
-            step = 2
-            name = "contextual_coding"
+            self.step = 3
+            self.step_name = "contextual_coding"
+            unfreeze_submodule(self.freeze_list[1:]) # Step3 仅冻结 “MV generation part”
         elif self.current_epoch == borders_of_steps[2]:
-            step = 3
-            name = "all"
-            # 解冻光流网络
-            unfreeze_submodule(self.freeze_list)
-        else:
-            step = 3
-            name = "all"
-        self.current_step = step
+            self.step = 4
+            self.step_name = "all"
+            unfreeze_submodule([self.video_net.opticFlow])
+
         loss_settings = dict()
-        loss_settings["step"] = step
-        loss_settings["name"] = name
+        loss_settings["step"] = self.step
+        loss_settings["name"] = self.step_name
 
         # 学习率对应原文3.4节
-        if step < 3:
+        if self.step < 4:
             loss_settings["lr"] = 1e-4
         else:
             loss_settings["lr"] = 1e-5
-        
-        loss_settings["components"] = []
-        if step == 0: # 为了 loss 里的循环不再使用此项
-            # x_tilde 是 warped frame in pixel domain，见附录B Step1
-            # loss_settings["components"].append("x_tilde_dist") 
-            pass
-        else:
-            # loss_settings["components"].append("x_hat_dist")
-            pass
 
-        if step == 0: 
+        if self.step == 1: 
             loss_settings["D-item"] = "x_tilde_dist" 
-            pass
         else:
             loss_settings["D-item"] = "x_hat_dist"
-            pass
-
-        if step == 0 or step == 3:
-            loss_settings["components"].append("mv_latent_rate") # gt 
-            loss_settings["components"].append("mv_prior_rate") # st
-        if step == 2 or step == 3:
-            loss_settings["components"].append("frame_latent_rate") # yt
-            loss_settings["components"].append("frame_prior_rate") # zt
+        
+        loss_settings["R-item"] = []
+        if self.step == 1 or self.step == 4:
+            loss_settings["R-item"].append("mv_latent_rate") # gt 
+            loss_settings["R-item"].append("mv_prior_rate") # st
+        if self.step == 3 or self.step == 4:
+            loss_settings["R-item"].append("frame_latent_rate") # yt
+            loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 
         self.loss_settings = loss_settings
 
@@ -205,11 +186,23 @@ class Trainer(Module):
             D_item = F.mse_loss(net_output["x_tilde"], target) # x_tilde 取自 DCVC_net 的 motioncompensation
         else:
             D_item = F.mse_loss(net_output["recon_image"], target)
-        loss = lambda_set[self.metric][self.quality_index] * D_item
+        # loss = lambda_set[self.metric][self.quality_index] * D_item
+        loss = 256 * D_item
+        # print("loss")
+        # print(D_item)
+        # print(loss)
 
+        # print(net_output.keys())
+        # print(net_output["x_tilde"].shape)
+        # print(target.shape)
+        # print(net_output["recon_image"].shape)
         # 率
-        for component in self.loss_settings["components"]:
+        for component in self.loss_settings["R-item"]:
+            # print(component)
+            # print(self.loss_setting2output_obj[component])
+            # print(net_output[self.loss_setting2output_obj[component]])
             loss += net_output[self.loss_setting2output_obj[component]]
+
         loss = self.loss_settings["lr"] * loss
         return loss
 
@@ -228,12 +221,11 @@ class Trainer(Module):
         self.optimizer.step()
 
         if train_args['model_type'] == 'psnr':
-            if self.current_step == 0:
+            if self.step == 1:
                 quality = PSNR(output['x_tilde'], input_image)
             else:
                 quality = PSNR(output['recon_image'], input_image)
-        # else:
-        #     quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
+
 
         return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
 
@@ -246,13 +238,13 @@ class Trainer(Module):
             loss = self.loss(output, input_image)
 
             # 可视化
-            if epoch < borders_of_steps[0]:
+            if self.step == 1:
                 self.visualization(self.current_epoch, input_image, output['x_tilde'], img_idx, output_folder)
             else:
                 self.visualization(self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
-                if self.current_step == 0:
+                if self.step == 1:
                     quality = PSNR(output['x_tilde'], input_image)
                 else:
                     quality = PSNR(output['recon_image'], input_image)
@@ -319,6 +311,11 @@ if __name__ == "__main__":
             wandb.log({"loss": loss, "quality": quality})
             wandb.log({"epoch": epoch, "batch": batch_idx})
             wandb.log({"bpp_mv_y": bpp_mv_y, "bpp_mv_z": bpp_mv_z, "bpp_y": bpp_y, "bpp_z": bpp_z, "bpp": bpp})
+
+            group = "step" + str(trainer.step)
+            wandb.log({f"{group}_loss": loss, f"{group}_quality": quality})
+            wandb.log({f"{group}_bpp_mv_y": bpp_mv_y, f"{group}_bpp_mv_z": bpp_mv_z, f"{group}_bpp_y": bpp_y, f"{group}_bpp_z": bpp_z, f"{group}_bpp": bpp})
+            wandb.log({f"{group}_epoch": epoch, f"{group}_batch": batch_idx})
             
         print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
 
@@ -353,6 +350,9 @@ if __name__ == "__main__":
         wandb.log({"val_loss": ave_loss, "val_quality": ave_quality, "epoch": epoch})
         wandb.log({"val_bpp_mv_y": ave_bpp_mv_y, "val_bpp_mv_z": ave_bpp_mv_z, "val_bpp_y": ave_bpp_y, "val_bpp_z": ave_bpp_z, "val_bpp": ave_bpp, "epoch": epoch})
 
+        group = "step" + str(trainer.step)
+        wandb.log({f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, "epoch": epoch})
+        wandb.log({f"{group}_val_bpp_mv_y": ave_bpp_mv_y, f"{group}_val_bpp_mv_z": ave_bpp_mv_z, f"{group}_val_bpp_y": ave_bpp_y, f"{group}_val_bpp_z": ave_bpp_z, f"{group}_val_bpp": ave_bpp, "epoch": epoch})
         # save model
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
         
