@@ -14,7 +14,7 @@ import wandb
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
-from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, get_save_folder
+from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, get_save_folder, clip_gradient
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",
@@ -212,6 +212,10 @@ class Trainer(Module):
         self.schedule()
 
         input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
+
+        # 和推理时一样将参考帧压缩？
+        input_image = self.i_frame_net(input_image)
+
         input_image = input_image.to(self.device)
         ref_image = ref_image.to(self.device)
         output = self.video_net.forward(referframe=ref_image, input_image=input_image)
@@ -220,6 +224,7 @@ class Trainer(Module):
 
         self.optimizer.zero_grad()
         # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 有clip，必要吗？
+        # clip_gradient(self.optimizer, 5)
         loss.backward()
         self.optimizer.step()
 
