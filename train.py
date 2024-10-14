@@ -130,10 +130,10 @@ class Trainer(Module):
         loss_settings["name"] = self.step_name
 
         # 学习率对应原文3.4节
-        if self.step < 4:
-            loss_settings["lr"] = 1e-4
-        else:
-            loss_settings["lr"] = 1e-5
+        # if self.step < 4:
+        #     loss_settings["lr"] = 1e-4
+        # else:
+        #     loss_settings["lr"] = 1e-5
 
         if self.step == 1: 
             loss_settings["D-item"] = "x_tilde_dist" 
@@ -150,6 +150,7 @@ class Trainer(Module):
         # 更新 trainer 的 loss_settings 
         self.loss_settings = loss_settings
 
+        # 更新优化器学习率
         if self.current_epoch == borders_of_steps[2]:
             self.optimizer.param_groups[0]["lr"] = 1e-5
             
@@ -202,8 +203,9 @@ class Trainer(Module):
             # print(self.loss_setting2output_obj[component])
             # print(net_output[self.loss_setting2output_obj[component]])
             loss += net_output[self.loss_setting2output_obj[component]]
-
-        loss = self.loss_settings["lr"] * loss
+        
+        # print("loss")
+        # loss = self.loss_settings["lr"] * loss 此为错误
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -217,6 +219,7 @@ class Trainer(Module):
         loss = self.loss(output, input_image)
 
         self.optimizer.zero_grad()
+        # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 有clip，必要吗？
         loss.backward()
         self.optimizer.step()
 
