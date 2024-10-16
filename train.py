@@ -35,11 +35,11 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # 3、4、5、6
     "gop": 10,
-    "epochs": 16,
+    "epochs": 15,
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [1, 6, 11]  
+borders_of_steps = [1, 4, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -85,7 +85,7 @@ class Trainer(Module):
         self.video_net.to(self.device)
 
         # 优化器
-        self.lr = [2e-4, 2e-5] # 3.4节
+        self.lr = [1e-4, 1e-5] # 3.4节
         self.optimizer = optim.Adam(self.video_net.parameters(), lr=self.lr[0])
 
         # 超参数
@@ -109,7 +109,7 @@ class Trainer(Module):
         self.freeze_list1 = [self.video_net.bitEstimator_z,
                             self.video_net.feature_extract,
                             self.video_net.context_refine,
-                            self.video_net.gaussian_encoder,
+                            # self.video_net.gaussian_encoder,
                             self.video_net.contextualEncoder,
                             self.video_net.contextualDecoder_part1,
                             self.video_net.contextualDecoder_part2, 
@@ -127,19 +127,25 @@ class Trainer(Module):
             self.step = 1
             self.step_name = 'me'
             freeze_submodule(self.freeze_list1)
+            self.optimizer.param_groups[0]["lr"] = self.lr[0]
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
             self.step_name = "reconstruction"
             unfreeze_submodule(self.freeze_list1)
             freeze_submodule(self.freeze_list)
+            self.optimizer.param_groups[0]["lr"] = self.lr[0]
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 3
             self.step_name = "contextual_coding"
-            unfreeze_submodule(self.freeze_list[1:]) # Step3 仅冻结 “MV generation part”
+            # unfreeze_submodule(self.freeze_list[1:]) 
+            # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
+            self.optimizer.param_groups[0]["lr"] = self.lr[0]
         elif self.current_epoch == borders_of_steps[2]:
             self.step = 4
             self.step_name = "all"
-            unfreeze_submodule([self.video_net.opticFlow])
+            # unfreeze_submodule([self.video_net.opticFlow])
+            unfreeze_submodule(self.freeze_list)
+            self.optimizer.param_groups[0]["lr"] = self.lr[1]
 
         loss_settings = dict()
         loss_settings["step"] = self.step
@@ -161,8 +167,8 @@ class Trainer(Module):
         self.loss_settings = loss_settings
 
         # 更新优化器学习率
-        if self.current_epoch == borders_of_steps[2]:
-            self.optimizer.param_groups[0]["lr"] = self.lr[1]
+        # if self.current_epoch == borders_of_steps[2]:
+        #     self.optimizer.param_groups[0]["lr"] = self.lr[1]
             
     """ 
     return value of DCVC_net.forward
@@ -226,16 +232,16 @@ class Trainer(Module):
         ref_image = ref_image.to(self.device)
         
         # 和推理时一样将参考帧压缩？
-        output = self.i_frame_net(input_image)
-        input_image = output['x_hat']
+        output = self.i_frame_net(ref_image)
+        ref_image = output['x_hat']
         output = self.video_net.forward(referframe=ref_image, input_image=input_image)
 
         loss = self.loss(output, input_image)
 
         self.optimizer.zero_grad()
+        loss.backward()
         # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 有clip，必要吗？
         clip_gradient(self.optimizer, 5)
-        loss.backward()
         self.optimizer.step()
 
         if train_args['model_type'] == 'psnr':
