@@ -126,12 +126,12 @@ class Trainer(Module):
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me'
-            freeze_submodule(self.freeze_list1)
+            # freeze_submodule(self.freeze_list1)
             self.optimizer.param_groups[0]["lr"] = self.lr[0]
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
             self.step_name = "reconstruction"
-            unfreeze_submodule(self.freeze_list1)
+            # unfreeze_submodule(self.freeze_list1)
             freeze_submodule(self.freeze_list)
             self.optimizer.param_groups[0]["lr"] = self.lr[0]
         elif self.current_epoch == borders_of_steps[1]:
@@ -228,8 +228,9 @@ class Trainer(Module):
         self.schedule()
 
         input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
-        input_image = input_image.to(self.device)
+        
         ref_image = ref_image.to(self.device)
+        input_image = input_image.to(self.device)
         
         # 和推理时一样将参考帧压缩？
         output = self.i_frame_net(ref_image)
@@ -255,59 +256,64 @@ class Trainer(Module):
 
     def validation_step(self, batch, img_idx, output_folder):
         input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
-        input_image = input_image.to(self.device)
+        
         ref_image = ref_image.to(self.device)
+        input_image = input_image.to(self.device)
+
+        output = self.i_frame_net(ref_image)
+        ref_image = output['x_hat']
+
         with torch.no_grad():
             output = self.video_net.forward(referframe=ref_image, input_image=input_image)
             loss = self.loss(output, input_image)
 
             # 可视化
-            if self.step == 1:
-                self.visualization(self.current_epoch, input_image, output['x_tilde'], img_idx, output_folder)
-            else:
-                self.visualization(self.current_epoch, input_image, output['recon_image'], img_idx, output_folder)
+            if img_idx < 10:
+                self.visualization(self.current_epoch, ref_image, input_image, output, img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
                 if self.step == 1:
                     quality = PSNR(output['x_tilde'], input_image)
                 else:
                     quality = PSNR(output['recon_image'], input_image)
-            # else:
-            #     quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
+            else:
+                # quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
+                pass
 
         return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
 
-    def visualization(self, epoch, net_input_image, net_output_image, img_idx, output_folder):
+    def visualization(self, epoch, net_ref_image, net_input_image, net_output, img_idx, output_folder):
         # 为每个权重创建一个与权重文件名相同的文件夹
         vis_folder = os.path.join(output_folder, f"model_epoch_{epoch}_visuals")
         if not os.path.exists(vis_folder):
             os.makedirs(vis_folder, exist_ok=True)
 
-        # 保存可视化图像
-        self.save_visualization(net_input_image, net_output_image, epoch, img_idx, vis_folder)
-
-    def save_visualization(self, input_image, output_image, epoch, img_idx, vis_folder):
         # 转换图像为可显示格式
-        ref_image_np = ref_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
-        input_image_np = input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
-        output_image_np = output_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+        ref_image_np = net_ref_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+        input_image_np = net_input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+        warped_image_np = net_output['x_tilde'][0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+        output_image_np = net_output['recon_image'][0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
 
         # 反归一化
         ref_image_np = (ref_image_np * 255).astype(np.uint8)
-        input_image_np = (input_image_np * 255).astype(np.uint8)    
+        input_image_np = (input_image_np * 255).astype(np.uint8)   
+        warped_image_np = (warped_image_np * 255).astype(np.uint8) 
         output_image_np = (output_image_np * 255).astype(np.uint8)
 
         # 创建图像对比图
-        fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        fig, ax = plt.subplots(1, 4, figsize=(20, 5))
         ax[0].imshow(ref_image_np)
         ax[0].set_title('Reference Image')
         ax[0].axis('off')
         ax[1].imshow(input_image_np)
         ax[1].set_title('Input Image')
         ax[1].axis('off')
-        ax[2].imshow(output_image_np)
-        ax[2].set_title('Output Image')
+        ax[2].imshow(warped_image_np)
+        ax[2].set_title('Warped Image')
         ax[2].axis('off')
+        ax[3].imshow(output_image_np)
+        ax[3].set_title('Reconstructed Image')
+        ax[3].axis('off')
 
         # 保存图片到新建的与权重同名的文件夹
         img_save_path = os.path.join(vis_folder, f'validation_{epoch}_{img_idx}.png')
