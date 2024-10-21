@@ -150,7 +150,7 @@ class DCVC_net(nn.Module):
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(out_channel_M * 10 // 3, out_channel_M * 8 // 3, 1),
             nn.LeakyReLU(inplace=True),
-            nn.Conv2d(out_channel_M * 8 // 3, out_channel_M * 6 // 3, 1), 
+            nn.Conv2d(out_channel_M * 8 // 3, out_channel_M * 6 // 3, 1),
         )
 
         self.auto_regressive = MaskedConv2d( # 训练时像注意力机制一样，只能看到自己之前的信息
@@ -241,7 +241,6 @@ class DCVC_net(nn.Module):
     def encode(self, ref_frame, input_image, output_path):
         from ..utils.stream_helper import encode_p
         N, C, H, W = ref_frame.size()
-
         compressed = self.compress(ref_frame, input_image)
         # 需要保留的信息
         mv_y_string = compressed['mv_y_string']
@@ -278,7 +277,7 @@ class DCVC_net(nn.Module):
         for h in range(height):
             for w in range(width):
                 y_crop = y_hat[0:1, :, h:h + kernel_size, w:w + kernel_size]
-                ctx_p = F.conv2d( 
+                ctx_p = F.conv2d(
                     y_crop,
                     context_prediction.weight,
                     bias=context_prediction.bias,
@@ -420,7 +419,6 @@ class DCVC_net(nn.Module):
     # 所以 mv_y_string, mv_z_string, y_string, z_string 就是压缩后的信息？
     def decompress(self, referframe, mv_y_string, mv_z_string, y_string, z_string, height, width):
         device = next(self.parameters()).device # 为什么需要这个
-        
         mv_z_size = get_downsampled_shape(height, width, 64)
         mv_z_hat = self.bitEstimator_z_mv.decompress(mv_z_string, mv_z_size)
         mv_z_hat = mv_z_hat.to(device)
