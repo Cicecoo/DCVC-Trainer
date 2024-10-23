@@ -185,13 +185,13 @@ class DCVC_net(nn.Module):
 
     def motioncompensation(self, ref, mv): # 运动补偿 
         # 渐进训练 step1 的 x tilde, 不应该经过 feature extractor？
-        x_tilde = flow_warp(ref, mv) 
+        # x_tilde = flow_warp(ref, mv) 
 
         ref_feature = self.feature_extract(ref) # 对应原文 feature extractor
         prediction_init = flow_warp(ref_feature, mv) # 此warp应该不是原文提到的warp？ 光流场变换：将参考帧的特征图根据光流场变换到当前帧
         context = self.context_refine(prediction_init)
 
-        return context, x_tilde
+        return context #, x_tilde
 
     def mv_refine(self, ref, mv):
         return self.mvDecoder_part2(torch.cat((mv, ref), 1)) + mv
@@ -446,6 +446,9 @@ class DCVC_net(nn.Module):
         return recon_image
 
     def forward(self, referframe, input_image):
+        # print("forward")
+        # print(referframe.shape)
+        # print(input_image.shape)
         # Figure 2 的橙色部分
         # [1]
         estmv = self.opticFlow(input_image, referframe) # 光流估计运动向量
@@ -474,7 +477,7 @@ class DCVC_net(nn.Module):
         quant_mv_upsample = self.mvDecoder_part1(quant_mv) # 上采样，为了恢复到合适的分辨率（原始尺寸）进行运动补偿？
         quant_mv_upsample_refine = self.mv_refine(referframe, quant_mv_upsample) # 注意是mv_refine而不是context_refine
         # 是因为单单对mv进行上采样信息不够？mv_refine的卷积学到的是什么？
-        context, x_tilde = self.motioncompensation(referframe, quant_mv_upsample_refine) # 此处motioncompensation包含了原文的feature extractor和context refine
+        context = self.motioncompensation(referframe, quant_mv_upsample_refine) # 此处motioncompensation包含了原文的feature extractor和context refine
         # 虽然叫motioncompensation，但除了运动补偿还包含了原文的feature extractor和context refine，
         # 除开二者，所以flow_warp对应原文的warp？
 
@@ -530,9 +533,77 @@ class DCVC_net(nn.Module):
                 "bpp": bpp,
                 "recon_image": recon_image,
                 "context": context,
-                "x_hat": recon_image,
+                "x_tilde": flow_warp(referframe, quant_mv_upsample_refine),
+                }
+    
+    def step1_forward(self, referframe, input_image):
+        estmv = self.opticFlow(input_image, referframe) 
+        mvfeature = self.mvEncoder(estmv)  
+        quant_mv = torch.round(mvfeature) 
+        quant_mv_upsample = self.mvDecoder_part1(quant_mv)
+        quant_mv_upsample_refine = self.mv_refine(referframe, quant_mv_upsample) # 此即 mv_decoder_part2
+        x_tilde = flow_warp(referframe, quant_mv_upsample_refine)
+
+        z_mv = self.mvpriorEncoder(mvfeature) 
+        compressed_z_mv = torch.round(z_mv) 
+        params_mv = self.mvpriorDecoder(compressed_z_mv)
+
+        quant_mv = torch.round(mvfeature) 
+        ctx_params_mv = self.auto_regressive_mv(quant_mv) 
+        gaussian_params_mv = self.entropy_parameters_mv( 
+            torch.cat((params_mv, ctx_params_mv), dim=1)  
+        ) 
+        means_hat_mv, scales_hat_mv = gaussian_params_mv.chunk(2, 1)
+
+        total_bits_mv, _ = self.feature_probs_based_sigma(mvfeature, means_hat_mv, scales_hat_mv)
+        total_bits_z_mv, _ = self.iclr18_estrate_bits_z_mv(compressed_z_mv)
+        im_shape = input_image.size()
+        pixel_num = im_shape[0] * im_shape[2] * im_shape[3]
+        bpp_mv_y = total_bits_mv / pixel_num
+        bpp_mv_z = total_bits_z_mv / pixel_num
+
+        return {"bpp_mv_y": bpp_mv_y,
+                "bpp_mv_z": bpp_mv_z,
                 "x_tilde": x_tilde,
                 }
+    
+    def forward_exclude_me(self, referframe, input_image):
+        # 参考原文，为了排除运动补偿部分，将原 reference frame 作为 context
+        context = referframe
+        temporal_prior_params = self.temporalPriorEncoder(context)
+
+        feature = self.contextualEncoder(torch.cat((input_image, context), dim=1))
+        feature_renorm = feature
+        recon_image_feature = self.contextualDecoder_part1(feature_renorm)
+        recon_image = self.contextualDecoder_part2(torch.cat((recon_image_feature, context), dim=1))
+
+        z = self.priorEncoder(feature)
+        compressed_z = torch.round(z)
+        params = self.priorDecoder(compressed_z)
+
+        compressed_y_renorm = torch.round(feature_renorm)
+        ctx_params = self.auto_regressive(compressed_y_renorm)
+        gaussian_params = self.entropy_parameters(
+            torch.cat((temporal_prior_params, params, ctx_params), dim=1)
+        )
+
+        means_hat, scales_hat = gaussian_params.chunk(2, 1)
+
+        total_bits_y, _ = self.feature_probs_based_sigma(feature_renorm, means_hat, scales_hat)
+        total_bits_z, _ = self.iclr18_estrate_bits_z(compressed_z)
+
+        im_shape = input_image.size()
+        pixel_num = im_shape[0] * im_shape[2] * im_shape[3]
+        bpp_y = total_bits_y / pixel_num
+        bpp_z = total_bits_z / pixel_num
+        bpp = bpp_y + bpp_z
+
+        return {"bpp_y": bpp_y,
+                "bpp_z": bpp_z,
+                "bpp": bpp,
+                "recon_image": recon_image,
+                }
+    
 
     def load_dict(self, pretrained_dict):
         result_dict = {}

@@ -8,7 +8,7 @@ from torch.nn import Module
 from src.models.DCVC_net import DCVC_net
 from src.zoo.image import model_architectures as architectures
 from test_video import PSNR, ms_ssim, read_frame_to_torch
-from dvc_dataset import RawDataSet
+from dvc_dataset import DataSet, RawDataSet
 
 import wandb
 import matplotlib.pyplot as plt
@@ -18,6 +18,7 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
+train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.txt'
 val_dataset_path = "H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val_1k.txt"
 
 train_args = {
@@ -37,9 +38,9 @@ train_args = {
     'resume': False,
     "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
-    "quality": 3,   # 3、4、5、6
+    "quality": 6,   # 3、4、5、6
     "gop": 10,
-    "epochs": 15,
+    "epochs": 16,
     "seed": 0,
 }
 
@@ -93,8 +94,8 @@ class Trainer(Module):
         self.video_net.to(self.device)
 
         # 优化器
-        self.lr = [1e-4, 1e-5] # 3.4节
-        self.optimizer = optim.Adam(self.video_net.parameters(), lr=self.lr[0])
+        self.lr = [1e-4, 1e-4, 1e-4, 1e-4] # 3.4节
+        self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
 
         # 超参数
         self.metric = args['metric']
@@ -114,19 +115,19 @@ class Trainer(Module):
                             self.video_net.mvDecoder_part2,
                             self.video_net.bitEstimator_z_mv
                             ]
-        self.freeze_list1 = [self.video_net.bitEstimator_z,
-                            self.video_net.feature_extract,
-                            self.video_net.context_refine,
-                            # self.video_net.gaussian_encoder,
-                            self.video_net.contextualEncoder,
-                            self.video_net.contextualDecoder_part1,
-                            self.video_net.contextualDecoder_part2, 
-                            self.video_net.priorEncoder,
-                            self.video_net.priorDecoder,
-                            self.video_net.entropy_parameters, 
-                            self.video_net.auto_regressive,
-                            self.video_net.temporalPriorEncoder
-                            ]
+        # self.freeze_list1 = [self.video_net.bitEstimator_z,
+        #                     self.video_net.feature_extract,
+        #                     self.video_net.context_refine,
+        #                     # self.video_net.gaussian_encoder,
+        #                     self.video_net.contextualEncoder,
+        #                     self.video_net.contextualDecoder_part1,
+        #                     self.video_net.contextualDecoder_part2, 
+        #                     self.video_net.priorEncoder,
+        #                     self.video_net.priorDecoder,
+        #                     self.video_net.entropy_parameters, 
+        #                     self.video_net.auto_regressive,
+        #                     self.video_net.temporalPriorEncoder
+        #                     ]
         self.step = None
         self.step_name = None
     
@@ -134,26 +135,21 @@ class Trainer(Module):
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me'
-            # freeze_submodule(self.freeze_list1)
-            self.optimizer.param_groups[0]["lr"] = self.lr[0]
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
             self.step_name = "reconstruction"
-            # unfreeze_submodule(self.freeze_list1)
             freeze_submodule(self.freeze_list)
-            self.optimizer.param_groups[0]["lr"] = self.lr[0]
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[1])
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 3
             self.step_name = "contextual_coding"
-            # unfreeze_submodule(self.freeze_list[1:]) 
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
-            self.optimizer.param_groups[0]["lr"] = self.lr[0]
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[2])
         elif self.current_epoch == borders_of_steps[2]:
             self.step = 4
             self.step_name = "all"
-            # unfreeze_submodule([self.video_net.opticFlow])
             unfreeze_submodule(self.freeze_list)
-            self.optimizer.param_groups[0]["lr"] = self.lr[1]
+            self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[3])
 
         loss_settings = dict()
         self.loss_settings.clear()
@@ -205,17 +201,29 @@ class Trainer(Module):
         # 失真
         # warmup 时需要只获取运动补偿输出
         if self.loss_settings["D-item"] == "x_tilde_dist":
-            D_item = F.mse_loss(net_output["x_tilde"], target) # x_tilde 取自 DCVC_net 的 motioncompensation
+            D_item = F.mse_loss(net_output["x_tilde"], target)
+            # temp = torch.mean((net_output["x_tilde"] - target).pow(2))
+            # print("D_item", D_item)
+            # print("temp", temp)
         else:
-            D_item = F.mse_loss(net_output["recon_image"], target)
+            D_item = F.mse_loss(net_output["recon_image"], target) 
         # loss = lambda_set[self.metric][self.quality_index] * D_item
-        loss = 256 * D_item
+        # loss = 256 * D_item
 
         # 率
+        R_item = 0
         for component in self.loss_settings["R-item"]:
-            loss += net_output[self.loss_setting2output_obj[component]]
-        
-        # print("loss", loss)
+            R_item += net_output[self.loss_setting2output_obj[component]]
+
+        # print("lambda", lambda_set[self.metric][self.quality_index])
+        # print("D_item", D_item)
+        # print("R_item", R_item)
+        # print("bpp_mv_y", net_output["bpp_mv_y"])
+        # print("bpp_mv_z", net_output["bpp_mv_z"])
+        # print("bpp_y", net_output["bpp_y"])
+        # print("bpp_z", net_output["bpp_z"])
+
+        loss = lambda_set[self.metric][self.quality_index] * D_item + R_item
         # loss = self.loss_settings["lr"] * loss 此为错误
         return loss
 
@@ -227,30 +235,35 @@ class Trainer(Module):
         
         ref_image = ref_image.to(self.device)
         input_image = input_image.to(self.device)
-        
-        # 和推理时一样将参考帧压缩？
+    
+        # 和推理时一样将参考帧压缩
         with torch.no_grad():
             output_i = self.i_frame_net(ref_image)
             ref_image = output_i['x_hat']
+
+        # if self.step == 1:
+        #     output_p = self.video_net.step1_forward(referframe=ref_image, input_image=input_image)
+        # else:
         output_p = self.video_net.forward(referframe=ref_image, input_image=input_image)
 
         loss = self.loss(output_p, input_image)
 
         self.optimizer.zero_grad()
         loss.backward()
-        # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 有clip，必要吗？
-        clip_gradient(self.optimizer, 5)
+        # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 必要吗？
+        # clip_gradient(self.optimizer, 5)
         self.optimizer.step()
 
+        # if self.step > 1:
         if train_args['model_type'] == 'psnr':
-            # if self.step == 1:
-            #     quality = PSNR(output['x_tilde'], input_image)
-            # else:
-            #     quality = PSNR(output['recon_image'], input_image)
             quality = PSNR(output_p['recon_image'], input_image)
         else:
             quality = ms_ssim(output_p['recon_image'], input_image, data_range=1.0).item()
+        # else:
+        #     quality = 0 
 
+        # if self.step == 1:
+        #     return loss, 0, output_p["bpp_mv_y"], output_p["bpp_mv_z"], 0, 0, output_p["bpp_mv_y"] + output_p["bpp_mv_z"]
         return loss, quality, output_p["bpp_mv_y"], output_p["bpp_mv_z"], output_p["bpp_y"], output_p["bpp_z"], output_p["bpp"]
 
     def validation_step(self, batch, img_idx, output_folder):
@@ -267,7 +280,7 @@ class Trainer(Module):
             loss = self.loss(output, input_image)
 
             # 可视化
-            if img_idx < 10:
+            if img_idx < 15:
                 self.visualization(self.current_epoch, ref_image, input_image, output, img_idx, output_folder)
             
             if train_args['model_type'] == 'psnr':
@@ -326,7 +339,7 @@ if __name__ == "__main__":
     save_folder = get_save_folder()
 
     trainer = Trainer(train_args)
-    dataset = DataSet()
+    dataset = DataSet(train_dataset_path)
     val_dataset = RawDataSet(val_dataset_path)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=train_args['worker'])
@@ -335,6 +348,8 @@ if __name__ == "__main__":
         # 训练
         trainer.current_epoch = epoch
         for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(dataloader):
+            # print(f"Epoch {epoch}, batch {batch_idx}")
+            # print(input_image.shape, ref_image.shape)
             loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx)
             
             wandb.log({"loss": loss, "quality": quality})
@@ -348,6 +363,9 @@ if __name__ == "__main__":
             
         print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
 
+        # save model
+        torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
+
         # 验证
         idx = 0
         losses = []
@@ -357,7 +375,7 @@ if __name__ == "__main__":
         bpp_ys = []
         bpp_zs = []
         bpps = []
-        for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(val_dataloader):
+        for batch_idx, (input_image, ref_image) in enumerate(val_dataloader):
             loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
             idx += 1
             losses.append(loss)
@@ -382,8 +400,7 @@ if __name__ == "__main__":
         group = "step" + str(trainer.step)
         wandb.log({f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, "epoch": epoch})
         wandb.log({f"{group}_val_bpp_mv_y": ave_bpp_mv_y, f"{group}_val_bpp_mv_z": ave_bpp_mv_z, f"{group}_val_bpp_y": ave_bpp_y, f"{group}_val_bpp_z": ave_bpp_z, f"{group}_val_bpp": ave_bpp, "epoch": epoch})
-        # save model
-        torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
+        
         
 
 
