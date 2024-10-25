@@ -10,6 +10,7 @@ from .video_net import ME_Spynet, GDN, flow_warp, ResBlock, ResBlock_LeakyReLU_0
 from ..entropy_models.video_entropy_models import BitEstimator, GaussianEncoder
 from ..utils.stream_helper import get_downsampled_shape
 from ..layers.layers import MaskedConv2d, subpel_conv3x3
+from .DVC_Spynet import ME_Spynet as DVC_Spynet
 
 
 class DCVC_net(nn.Module):
@@ -179,7 +180,8 @@ class DCVC_net(nn.Module):
             nn.Conv2d(out_channel_N, out_channel_M, 5, stride=2, padding=2),
         )
 
-        self.opticFlow = ME_Spynet()
+        # self.opticFlow = ME_Spynet()
+        self.opticFlow = DVC_Spynet()
 
         # http://content.sniklaus.com/github/pytorch-spynet/network-sintel-final.pytorch
 
