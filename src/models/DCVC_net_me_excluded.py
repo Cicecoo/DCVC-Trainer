@@ -16,7 +16,7 @@ class DCVC_net(nn.Module):
     def __init__(self):
         super().__init__()
         out_channel_mv = 128 # 运动向量的输出通道数
-        out_channel_N = 64  
+        out_channel_N = 3 
         out_channel_M = 96
 
         self.out_channel_mv = out_channel_mv
@@ -24,7 +24,7 @@ class DCVC_net(nn.Module):
         self.out_channel_M = out_channel_M
 
         self.bitEstimator_z = BitEstimator(out_channel_N) # BitEstimator：
-        self.bitEstimator_z_mv = BitEstimator(out_channel_N)
+        # self.bitEstimator_z_mv = BitEstimator(out_channel_N)
 
         self.feature_extract = nn.Sequential(
             nn.Conv2d(3, out_channel_N, 3, stride=1, padding=1),
@@ -127,23 +127,23 @@ class DCVC_net(nn.Module):
             nn.ConvTranspose2d(out_channel_M, out_channel_M, 3, stride=1, padding=1)
         )
 
-        self.mvpriorEncoder = nn.Sequential( # 压缩通道数、下采样
-            nn.Conv2d(out_channel_mv, out_channel_N, 3, stride=1, padding=1),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(out_channel_N, out_channel_N, 5, stride=2, padding=2),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(out_channel_N, out_channel_N, 5, stride=2, padding=2),
-        )
+        # self.mvpriorEncoder = nn.Sequential( # 压缩通道数、下采样
+        #     nn.Conv2d(out_channel_mv, out_channel_N, 3, stride=1, padding=1),
+        #     nn.LeakyReLU(inplace=True),
+        #     nn.Conv2d(out_channel_N, out_channel_N, 5, stride=2, padding=2),
+        #     nn.LeakyReLU(inplace=True),
+        #     nn.Conv2d(out_channel_N, out_channel_N, 5, stride=2, padding=2),
+        # )
 
-        self.mvpriorDecoder = nn.Sequential(
-            nn.ConvTranspose2d(out_channel_N, out_channel_N, 5,
-                               stride=2, padding=2, output_padding=1),
-            nn.LeakyReLU(inplace=True),
-            nn.ConvTranspose2d(out_channel_N, out_channel_N * 3 // 2, 5,
-                               stride=2, padding=2, output_padding=1),
-            nn.LeakyReLU(inplace=True),
-            nn.ConvTranspose2d(out_channel_N * 3 // 2, out_channel_mv*2, 3, stride=1, padding=1)
-        )
+        # self.mvpriorDecoder = nn.Sequential(
+        #     nn.ConvTranspose2d(out_channel_N, out_channel_N, 5,
+        #                        stride=2, padding=2, output_padding=1),
+        #     nn.LeakyReLU(inplace=True),
+        #     nn.ConvTranspose2d(out_channel_N, out_channel_N * 3 // 2, 5,
+        #                        stride=2, padding=2, output_padding=1),
+        #     nn.LeakyReLU(inplace=True),
+        #     nn.ConvTranspose2d(out_channel_N * 3 // 2, out_channel_mv*2, 3, stride=1, padding=1)
+        # )
 
         self.entropy_parameters = nn.Sequential( # 压缩通道数
             nn.Conv2d(out_channel_M * 12 // 3, out_channel_M * 10 // 3, 1),
@@ -157,17 +157,17 @@ class DCVC_net(nn.Module):
             out_channel_M, 2 * out_channel_M, kernel_size=5, padding=2, stride=1
         )
 
-        self.auto_regressive_mv = MaskedConv2d(
-            out_channel_mv, 2 * out_channel_mv, kernel_size=5, padding=2, stride=1
-        )
+        # self.auto_regressive_mv = MaskedConv2d(
+        #     out_channel_mv, 2 * out_channel_mv, kernel_size=5, padding=2, stride=1
+        # )
 
-        self.entropy_parameters_mv = nn.Sequential(
-            nn.Conv2d(out_channel_mv * 12 // 3, out_channel_mv * 10 // 3, 1),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(out_channel_mv * 10 // 3, out_channel_mv * 8 // 3, 1),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(out_channel_mv * 8 // 3, out_channel_mv * 6 // 3, 1),
-        )
+        # self.entropy_parameters_mv = nn.Sequential(
+        #     nn.Conv2d(out_channel_mv * 12 // 3, out_channel_mv * 10 // 3, 1),
+        #     nn.LeakyReLU(inplace=True),
+        #     nn.Conv2d(out_channel_mv * 10 // 3, out_channel_mv * 8 // 3, 1),
+        #     nn.LeakyReLU(inplace=True),
+        #     nn.Conv2d(out_channel_mv * 8 // 3, out_channel_mv * 6 // 3, 1),
+        # )
 
         self.temporalPriorEncoder = nn.Sequential(
             nn.Conv2d(out_channel_N, out_channel_N, 5, stride=2, padding=2),
@@ -179,7 +179,7 @@ class DCVC_net(nn.Module):
             nn.Conv2d(out_channel_N, out_channel_M, 5, stride=2, padding=2),
         )
 
-        self.opticFlow = ME_Spynet()
+        # self.opticFlow = ME_Spynet()
 
         # http://content.sniklaus.com/github/pytorch-spynet/network-sintel-final.pytorch
 
@@ -536,6 +536,43 @@ class DCVC_net(nn.Module):
                 "x_tilde": flow_warp(referframe, quant_mv_upsample_refine),
                 }
     
+    def forward_exclude_me(self, referframe, input_image):
+        # 参考原文，为了排除运动补偿部分，将原 reference frame 作为 context
+        context = referframe
+        temporal_prior_params = self.temporalPriorEncoder(context)
+
+        feature = self.contextualEncoder(torch.cat((input_image, context), dim=1))
+        feature_renorm = feature
+        recon_image_feature = self.contextualDecoder_part1(feature_renorm)
+        recon_image = self.contextualDecoder_part2(torch.cat((recon_image_feature, context), dim=1))
+
+        z = self.priorEncoder(feature)
+        compressed_z = torch.round(z)
+        params = self.priorDecoder(compressed_z)
+
+        compressed_y_renorm = torch.round(feature_renorm)
+        ctx_params = self.auto_regressive(compressed_y_renorm)
+        gaussian_params = self.entropy_parameters(
+            torch.cat((temporal_prior_params, params, ctx_params), dim=1)
+        )
+
+        means_hat, scales_hat = gaussian_params.chunk(2, 1)
+
+        total_bits_y, _ = self.feature_probs_based_sigma(feature_renorm, means_hat, scales_hat)
+        total_bits_z, _ = self.iclr18_estrate_bits_z(compressed_z)
+
+        im_shape = input_image.size()
+        pixel_num = im_shape[0] * im_shape[2] * im_shape[3]
+        bpp_y = total_bits_y / pixel_num
+        bpp_z = total_bits_z / pixel_num
+        bpp = bpp_y + bpp_z
+
+        return {"bpp_y": bpp_y,
+                "bpp_z": bpp_z,
+                "bpp": bpp,
+                "recon_image": recon_image,
+                }
+
     def step1_forward(self, referframe, input_image):
         estmv = self.opticFlow(input_image, referframe) 
         mvfeature = self.mvEncoder(estmv)  

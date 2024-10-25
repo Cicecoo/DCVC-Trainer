@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import Module
-from src.models.DCVC_net import DCVC_net
+# from src.models.DCVC_net import DCVC_net
 from src.zoo.image import model_architectures as architectures
 from test_video import PSNR, ms_ssim, read_frame_to_torch
 from dvc_dataset import DataSet, RawDataSet
@@ -16,6 +16,8 @@ import numpy as np
 import torch.nn as nn
 from utils import get_save_folder, clip_gradient
 import random
+
+from src.models.DCVC_net_me_excluded import DCVC_net
 
 
 train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.txt'
@@ -42,6 +44,7 @@ train_args = {
     "gop": 10,
     "epochs": 16,
     "seed": 0,
+    "note": "me excluded"
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
@@ -101,7 +104,7 @@ class Trainer(Module):
     def loss(self, net_output, target):
         D_item = F.mse_loss(net_output["recon_image"], target) 
 
-        R_item = net_output["bpp_mv_y"] + net_output["bpp_mv_z"]
+        R_item = net_output["bpp_y"] + net_output["bpp_z"]
 
         loss = lambda_set[self.metric][self.quality_index] * D_item + R_item
         return loss

@@ -11,14 +11,16 @@ def load_submodule_params(submodule, whole_module_checkpoint, submodule_name):
     # print("submodule_params", submodule_params.keys())
     # print("whole_module_state_dict", whole_module_state_dict.keys())
 
+    cnt = 0
     for name, param in submodule_params.items():
         full_name = submodule_name + '.' + name
         print("loading", full_name, "to", name)
         if full_name in whole_module_state_dict:
             submodule_params[name] = whole_module_state_dict[full_name]
+            cnt += 1
         else:
             print("WARNING: could not find", full_name, "for", name, "in checkpoint")
-
+    print("loaded", cnt, "params for", submodule_name)
     submodule.load_state_dict(submodule_params)
 
 
