@@ -40,12 +40,12 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 6,   # 3、4、5、6
     "gop": 10,
-    "epochs": 15,
+    "epochs": 16,
     "seed": 0,
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [15, 4, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
+borders_of_steps = [1, 4, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -85,7 +85,8 @@ class Trainer(Module):
             self.video_net.load_dict(load_checkpoint)
         else:
             # 仅加载光流网络
-            load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
+            # load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
+            pass
 
         # 加载到 gpu
         self.device = torch.device("cuda" if args['cuda'] else "cpu")

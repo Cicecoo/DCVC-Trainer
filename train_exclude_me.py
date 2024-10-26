@@ -20,8 +20,8 @@ import random
 from src.models.DCVC_net_me_excluded import DCVC_net
 
 
-train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.txt'
-val_dataset_path = "H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val_1k.txt"
+train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/huge_dvc_test.txt'
+val_dataset_path = "H:/Data/vimeo_septuplet/vimeo_septuplet/huge_dvc_test_val.txt"
 
 train_args = {
     'i_frame_model_name': "cheng2020-anchor",

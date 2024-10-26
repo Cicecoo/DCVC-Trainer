@@ -5,7 +5,8 @@ import numpy as np
 
 # 参考 https://github.com/ZhihaoHu/PyTorchVideoCompression
 
-modelspath = './flow_pretrain_np/'
+# modelspath = './flow_pretrain_np/'
+modelspath = 'D:\\WorkSpace\\Projects\\Compression\\DCVC-Trainer\\src\\models\\flow_pretrain_np\\'
 
 Backward_tensorGrid = [{} for i in range(8)]
 
@@ -71,6 +72,8 @@ class MEBasic(nn.Module):
         self.relu4 = nn.ReLU()
         self.conv5 = nn.Conv2d(16, 2, 7, 1, padding=3)
         self.conv5.weight.data, self.conv5.bias.data = loadweightformnp(layername + '_F-5')
+
+        print('load model: ', layername)
 
     def forward(self, x):
         x = self.relu1(self.conv1(x))
