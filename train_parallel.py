@@ -17,6 +17,8 @@ import torch.nn as nn
 from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, get_save_folder, clip_gradient
 import random
 
+from torch.nn.parallel import DataParallel
+
 
 train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.txt'
 val_dataset_path = "H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val_1k.txt"
@@ -33,11 +35,12 @@ train_args = {
     'worker': 1,
     'cuda': True,
     'cuda_device': 0,
+    # 'output_json_result_path': "required_value",  
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
-    "quality": 3,   # in [3、4、5、6]
+    "quality": 6,   # 3、4、5、6
     "gop": 10,
     "epochs": 16,
     "seed": 0,

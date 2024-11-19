@@ -186,14 +186,14 @@ class DCVC_net(nn.Module):
         # http://content.sniklaus.com/github/pytorch-spynet/network-sintel-final.pytorch
 
     def motioncompensation(self, ref, mv): # 运动补偿 
-        # 渐进训练 step1 的 x tilde, 不应该经过 feature extractor？
+        # 渐进训练 step1 的 x tilde, 不应该经过 feature extractor
         # x_tilde = flow_warp(ref, mv) 
 
-        ref_feature = self.feature_extract(ref) # 对应原文 feature extractor
-        prediction_init = flow_warp(ref_feature, mv) # 此warp应该不是原文提到的warp？ 光流场变换：将参考帧的特征图根据光流场变换到当前帧
+        ref_feature = self.feature_extract(ref) 
+        prediction_init = flow_warp(ref_feature, mv) # 此warp应该不是原文提到的warp?
         context = self.context_refine(prediction_init)
 
-        return context #, x_tilde
+        return context 
 
     def mv_refine(self, ref, mv):
         return self.mvDecoder_part2(torch.cat((mv, ref), 1)) + mv
@@ -202,7 +202,10 @@ class DCVC_net(nn.Module):
         assert(mode == "dequantize")
         outputs = inputs.clone()
         outputs -= means
-        outputs = torch.round(outputs)
+        # outputs = torch.round(outputs)
+        # 改为可导操作
+        outputs = self.add_noise(outputs)
+
         outputs += means
         return outputs
 
@@ -446,6 +449,19 @@ class DCVC_net(nn.Module):
         recon_image = recon_image.clamp(0, 1)
 
         return recon_image
+    
+    # 替换 round 为可导的
+    def quant(self, x, force_detach=True):
+        if self.training or force_detach:
+            n = torch.round(x) - x
+            n = n.clone().detach()
+            return x + n
+        return torch.round(x)
+    
+    def add_noise(self, x):
+        noise = torch.nn.init.uniform_(torch.zeros_like(x), -0.5, 0.5)
+        noise = noise.clone().detach()
+        return x + noise
 
     def forward(self, referframe, input_image):
         # print("forward")
@@ -456,14 +472,16 @@ class DCVC_net(nn.Module):
         estmv = self.opticFlow(input_image, referframe) # 光流估计运动向量
         mvfeature = self.mvEncoder(estmv)   # 为什么编码后作为特征？mvEncoder做了什么？
         z_mv = self.mvpriorEncoder(mvfeature)   # z 代表什么？ —— latent vector？z 常表示潜在特征空间
-        compressed_z_mv = torch.round(z_mv) # 量化：或许就如命名 compressed 一样，此处量化只是减小空间开销？
+        # compressed_z_mv = torch.round(z_mv) # 量化：或许就如命名 compressed 一样，此处量化只是减小空间开销？
+        compressed_z_mv = self.quant(z_mv)
         
         # [2]
         params_mv = self.mvpriorDecoder(compressed_z_mv) # 解码，为什么要 编码+量化+解码？为了引入量化？为了压缩？
         # params_mv，作为什么的参数？如果 编码+量化+解码 只是为了引入量化，那么params_mv地位应该等同于mvfeature，但之后又单独量化了mvfeature
         
         # [3]
-        quant_mv = torch.round(mvfeature)   # 单独量化 mvfeature
+        # quant_mv = torch.round(mvfeature)   # 单独量化 mvfeature
+        quant_mv = self.quant(mvfeature)
 
         ctx_params_mv = self.auto_regressive_mv(quant_mv) # 自回归编码，为什么要自回归编码？
         # 为mv的每个值引入上下文信息？
@@ -489,7 +507,9 @@ class DCVC_net(nn.Module):
         # 得到 params 除去了 temporal_prior_params 和 ctx_params，所以此处对应原文的 hyperprior？
         feature = self.contextualEncoder(torch.cat((input_image, context), dim=1))
         z = self.priorEncoder(feature)
-        compressed_z = torch.round(z) # 量化后都称为compressed？
+
+        compressed_z = self.quant(z)
+        # compressed_z = torch.round(z) # 量化后都称为compressed？
 
         # [6]
         params = self.priorDecoder(compressed_z) # 得到 ctx_params
@@ -497,7 +517,8 @@ class DCVC_net(nn.Module):
         # [7]
         feature_renorm = feature # ? renorm，就像mvfeature一样，单独又量化了一次
 
-        compressed_y_renorm = torch.round(feature_renorm)
+        compressed_y_renorm = self.quant(feature_renorm)
+        # compressed_y_renorm = torch.round(feature_renorm)
 
         ctx_params = self.auto_regressive(compressed_y_renorm) # 自回归引入空间上下文信息
         # 综合使用 temporal_prior_params, params, ctx_params 估计分布的参数
