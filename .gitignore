@@ -1,9 +1,9 @@
 DCVC/
-DVC/
+DVC/examples/flow_pretrain_np/*
 
 src/
 media/
-checkpoints/
+checkpoints/*
 assets/
 runs/
 
@@ -17,3 +17,5 @@ run
 
 recon*
 dataset_config.json
+
+*/__pycache__/
