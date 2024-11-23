@@ -18,10 +18,11 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.txt'
-val_dataset_path = "H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val_1k.txt"
+train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_10k.txt'
+val_dataset_path = "/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_val_1k.txt"
 
 train_args = {
+    'project': "DCVC-Trainer_remote",
     'describe': "后三个step保持不变，轮次3+3+6，运动估计（step1）改为4epoch（对应TCM的1+3），学习率渐增",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
@@ -45,7 +46,7 @@ train_args = {
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [1, 4, 7, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
+borders_of_steps = [2, 4, 7, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -95,7 +96,7 @@ class Trainer(Module):
         self.video_net.to(self.device)
 
         # 优化器
-        self.lr = [1e-4, 1e-4, 1e-4, 1e-4] # 3.4节
+        self.lr = [1e-5, 1e-4, 1e-4, 1e-4] # 3.4节
         self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
 
         # 超参数
@@ -136,9 +137,11 @@ class Trainer(Module):
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me1'
+            freeze_submodule([self.video_net.opticFlow])
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
             self.step_name = "me2"
+            unfreeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[0])
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 3
@@ -341,7 +344,7 @@ if __name__ == "__main__":
     # trainer = Trainer(train_args)
     # exit()
 
-    wandb.init(project="DCVC-Trainer")
+    wandb.init(project=train_args["project"])
     wandb.config.update(train_args)
 
     if train_args["seed"] is not None:
@@ -411,8 +414,4 @@ if __name__ == "__main__":
         group = "step" + str(trainer.step)
         wandb.log({f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, "epoch": epoch})
         wandb.log({f"{group}_val_bpp_mv_y": ave_bpp_mv_y, f"{group}_val_bpp_mv_z": ave_bpp_mv_z, f"{group}_val_bpp_y": ave_bpp_y, f"{group}_val_bpp_z": ave_bpp_z, f"{group}_val_bpp": ave_bpp, "epoch": epoch})
-        
-        
-
-
 

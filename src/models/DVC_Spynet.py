@@ -6,7 +6,7 @@ import numpy as np
 # 参考 https://github.com/ZhihaoHu/PyTorchVideoCompression
 
 # modelspath = './flow_pretrain_np/'
-modelspath = 'D:\\WorkSpace\\Projects\\Compression\\DCVC-Trainer\\src\\models\\flow_pretrain_np\\'
+modelspath = '/home/zhaojunzhang/workspace/dcvc/DCVC-Trainer/src/models/flow_pretrain_np/'
 
 Backward_tensorGrid = [{} for i in range(8)]
 

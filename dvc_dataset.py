@@ -17,11 +17,11 @@ out_channel_N = 64
 out_channel_M = 96
 
 vimeo_data_path = '' # 'H:/Data/vimeo_septuplet/vimeo_septuplet/sequences/''../../../../../../mnt/h/Data/vimeo_septuplet/vimeo_septuplet/sequences/'
-vimeo_test_list_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.txt'
+vimeo_test_list_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_10k.txt'
 
 class DataSet(data.Dataset):
     def __init__(self, path=vimeo_test_list_path, im_height=256, im_width=256):
-        self.image_input_list, self.image_ref_list = self.get_vimeo(rootdir='H:/Data/vimeo_septuplet/vimeo_septuplet/sequences/', filefolderlist=path)
+        self.image_input_list, self.image_ref_list = self.get_vimeo(rootdir='/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences/', filefolderlist=path)
         self.im_height = im_height
         self.im_width = im_width
         
@@ -73,7 +73,7 @@ class DataSet(data.Dataset):
         
 class RawDataSet(data.Dataset):
     def __init__(self, path=vimeo_test_list_path):
-        self.image_input_list, self.image_ref_list = self.get_vimeo(rootdir='H:/Data/vimeo_septuplet/vimeo_septuplet/sequences/', filefolderlist=path)
+        self.image_input_list, self.image_ref_list = self.get_vimeo(rootdir='/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences/', filefolderlist=path)
         print("dataset find image: ", len(self.image_input_list))
         
     def get_vimeo(self, rootdir, filefolderlist):

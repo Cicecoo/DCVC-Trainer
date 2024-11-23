@@ -17,7 +17,7 @@ from tqdm import tqdm
 import warnings
 from pytorch_msssim import ms_ssim
 
-import onnx
+# import onnx
 
 
 warnings.filterwarnings("ignore", message="Setting attributes on ParameterList is not supported.")
