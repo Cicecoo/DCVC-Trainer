@@ -44,7 +44,7 @@ train_args = {
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [1, 4, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
+borders_of_steps = [1, 4, 7, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -94,7 +94,7 @@ class Trainer(Module):
         self.video_net.to(self.device)
 
         # 优化器
-        self.lr = [5e-4, 1e-4, 1e-4, 1e-4] # 3.4节
+        self.lr = [1e-4, 1e-4, 1e-4, 1e-4] # 3.4节
         self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
 
         # 超参数
@@ -134,19 +134,23 @@ class Trainer(Module):
     def schedule(self):
         if self.current_epoch == 0:
             self.step = 1
-            self.step_name = 'me'
+            self.step_name = 'me1'
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
+            self.step_name = "me2"
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[0])
+        elif self.current_epoch == borders_of_steps[1]:
+            self.step = 3
             self.step_name = "reconstruction"
             freeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[1])
-        elif self.current_epoch == borders_of_steps[1]:
-            self.step = 3
+        elif self.current_epoch == borders_of_steps[2]:
+            self.step = 4
             self.step_name = "contextual_coding"
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[2])
-        elif self.current_epoch == borders_of_steps[2]:
-            self.step = 4
+        elif self.current_epoch == borders_of_steps[3]:
+            self.step = 5
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[3])
@@ -156,16 +160,16 @@ class Trainer(Module):
         loss_settings["step"] = self.step
         loss_settings["name"] = self.step_name
 
-        if self.step == 1: 
+        if self.step == 1 or self.step == 2: 
             loss_settings["D-item"] = "x_tilde_dist" 
         else:
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        if self.step == 1 or self.step == 4:
+        if self.step == 2 or self.step == 5:
             loss_settings["R-item"].append("mv_latent_rate") # gt 
             loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 3 or self.step == 4:
+        if self.step == 4 or self.step == 5:
             loss_settings["R-item"].append("frame_latent_rate") # yt
             loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 
