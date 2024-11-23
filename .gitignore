@@ -1,18 +1,17 @@
 DCVC/
 DVC/examples/flow_pretrain_np/*
 
-src/
+# src/
 media/
 checkpoints/*
 assets/
-runs/
+runs/*
 
 __pycache__/
 wandb/
 
 
 make_graph.py
-run
 # test_video.py
 
 recon*
