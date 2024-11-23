@@ -22,6 +22,7 @@ train_dataset_path = 'H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_10k.
 val_dataset_path = "H:/Data/vimeo_septuplet/vimeo_septuplet/mini_dvc_test_val_1k.txt"
 
 train_args = {
+    'describe': "后三个step保持不变，轮次3+3+6，运动估计（step1）改为TCM的1+3，第一个epoch冻结光流训练MV encoder、decoder",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
