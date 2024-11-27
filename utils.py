@@ -60,15 +60,16 @@ def random_crop_and_pad_image_list(image_list, size):
 
 
 def get_save_folder():
-    save_folder = "runs/"
+    save_folder = "/mnt/data3/zhaojunzhang/runs/dcvc/"
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
     # 检测并按序号新建文件夹 train0, train1, ...
     sub_dir_name = "train"
-    # 检查当前目录下是否有 train0, train1, ... 文件夹
+    # 检查当前目录下是否有形如 "train + 数字 + 其他" 的文件夹
     sub_dir_index = 0
-    while os.path.exists(os.path.join(save_folder, sub_dir_name + str(sub_dir_index))):
+    while any(os.path.isdir(os.path.join(save_folder, d)) and d.startswith(sub_dir_name + str(sub_dir_index)) 
+              for d in os.listdir(save_folder)):
         sub_dir_index += 1
     # 新建文件夹
     sub_dir_name = sub_dir_name + str(sub_dir_index)

@@ -18,12 +18,12 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_10k.txt'
-val_dataset_path = "/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_val_1k.txt"
+train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/huge_dvc_test.txt'
+val_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/huge_dvc_test_val.txt'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "后三个step保持不变，轮次3+3+6，运动估计（step1）改为TCM的1+3，第一个epoch冻结光流训练MV encoder、decoder",
+    'describe': "step1、2设置为2+2，先冻结光流训练MV encoder、decoder（loss添加gt、st的rate项）",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -37,7 +37,7 @@ train_args = {
     'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 4,
+    "batch_size": 32,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
@@ -46,7 +46,8 @@ train_args = {
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [1, 4, 7, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
+borders_of_steps = [2, 4, 7, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
+lr_set = [1e-4, 1e-4, 1e-4, 1e-4, 1e-4]
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -96,7 +97,7 @@ class Trainer(Module):
         self.video_net.to(self.device)
 
         # 优化器
-        self.lr = [1e-4, 1e-4, 1e-4, 1e-4] # 3.4节
+        self.lr = lr_set
         self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
 
         # 超参数
@@ -142,22 +143,22 @@ class Trainer(Module):
             self.step = 2
             self.step_name = "me2"
             unfreeze_submodule(self.freeze_list)
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[0])
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 3
             self.step_name = "reconstruction"
             freeze_submodule(self.freeze_list)
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[1])
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
         elif self.current_epoch == borders_of_steps[2]:
             self.step = 4
             self.step_name = "contextual_coding"
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[2])
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
         elif self.current_epoch == borders_of_steps[3]:
             self.step = 5
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
-            self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[3])
+            self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[self.step-1])
 
         loss_settings = dict()
         self.loss_settings.clear()
@@ -170,7 +171,7 @@ class Trainer(Module):
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        if self.step == 2 or self.step == 5:
+        if self.step == 2 or self.step == 5 or self.step == 1:
             loss_settings["R-item"].append("mv_latent_rate") # gt 
             loss_settings["R-item"].append("mv_prior_rate") # st
         if self.step == 4 or self.step == 5:
