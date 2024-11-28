@@ -23,7 +23,7 @@ val_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/huge_dvc_test_val.tx
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "后三个step保持不变，轮次3+3+6，step1学习率从1e-5开始，不冻结光流",
+    'describe': "step1学习率从1e-5开始，不冻结光流，不拆分阶段",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -34,26 +34,28 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 1,
     'cuda': True,
-    'cuda_device': 0,
+    'cuda_device': 1,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 32,
+    "batch_size": 64,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
     "epochs": 16,
     "seed": 0,
+    "border_of_steps": [2, 4, 7, 10],
+    "lr_set": {
+        "me1": 1e-5,
+        "me2": 1e-4,
+        "reconstruction": 1e-4,
+        "contextual_coding": 1e-4,
+        "all": 1e-4
+        }
 }
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
-borders_of_steps = [2, 4, 7, 10] # 参考 https://arxiv.org/pdf/2111.13850v1 "single" stage
-lr_set = {
-    "me1": 1e-5,
-    "me2": 1e-4,
-    "reconstruction": 1e-4,
-    "contextual_coding": 1e-4,
-    "all": 1e-4
-}
+borders_of_steps = train_args["border_of_steps"]
+lr_set = train_args["lr_set"]
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -96,15 +98,14 @@ class Trainer(Module):
             # load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
             pass
 
-        # 加载到 gpu
-        self.device = torch.device("cuda" if args['cuda'] else "cpu")
+        # 加载到 args['cuda_device']
+        self.device = torch.device('cuda', args['cuda_device']) if args['cuda'] else torch.device('cpu')
         self.i_frame_net.to(self.device)
         self.i_frame_net.eval()
         self.video_net.to(self.device)
 
         # 优化器
         self.lr = lr_set
-        self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
 
         # 超参数
         self.metric = args['metric']
@@ -144,13 +145,8 @@ class Trainer(Module):
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me1'
-            # freeze_submodule([self.video_net.opticFlow])
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
         elif self.current_epoch == borders_of_steps[0]:
-            # self.step = 2
-            # self.step_name = "me2"
-            # unfreeze_submodule(self.freeze_list)
-            # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
             pass
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 2
@@ -173,16 +169,16 @@ class Trainer(Module):
         loss_settings["step"] = self.step
         loss_settings["name"] = self.step_name
 
-        if self.step == 1 or self.step == 2: 
+        if self.step == 1: # or self.step == 2: 
             loss_settings["D-item"] = "x_tilde_dist" 
         else:
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        if self.step == 2 or self.step == 5 or self.step == 1:
+        if self.step == 1 or self.step == 4: # or self.step == 1:
             loss_settings["R-item"].append("mv_latent_rate") # gt 
             loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 4 or self.step == 5:
+        if self.step == 3 or self.step == 4:
             loss_settings["R-item"].append("frame_latent_rate") # yt
             loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 

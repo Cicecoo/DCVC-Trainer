@@ -38,7 +38,7 @@ train_args = {
     'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 32,
+    "batch_size": 64,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,

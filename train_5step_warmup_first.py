@@ -144,26 +144,26 @@ class Trainer(Module):
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me1'
-            # freeze_submodule([self.video_net.opticFlow])
+            freeze_submodule([self.video_net.opticFlow])
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
         elif self.current_epoch == borders_of_steps[0]:
-            # self.step = 2
-            # self.step_name = "me2"
-            # unfreeze_submodule(self.freeze_list)
-            # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
+            self.step = 2
+            self.step_name = "me2"
+            unfreeze_submodule(self.freeze_list)
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
             pass
         elif self.current_epoch == borders_of_steps[1]:
-            self.step = 2
+            self.step = 3
             self.step_name = "reconstruction"
             freeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
         elif self.current_epoch == borders_of_steps[2]:
-            self.step = 3
+            self.step = 4
             self.step_name = "contextual_coding"
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
         elif self.current_epoch == borders_of_steps[3]:
-            self.step = 4
+            self.step = 5
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[self.step_name])
