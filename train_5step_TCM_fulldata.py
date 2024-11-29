@@ -5,11 +5,11 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import Module
-# from src.models.DCVC_net import DCVC_net
-from src.models.DCVC_net_Spynet import DCVC_net
+from src.models.DCVC_net import DCVC_net
+# from src.models.DCVC_net_Spynet import DCVC_net
 from src.zoo.image import model_architectures as architectures
 from test_video import PSNR, ms_ssim, read_frame_to_torch
-from dvc_dataset import DataSet, RawDataSet
+from dvc_dataset import DataSet, RawDataSet, UVGDataSet
 
 import wandb
 import matplotlib.pyplot as plt
@@ -19,12 +19,12 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/huge_dvc_test.txt'
-val_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/huge_dvc_test_val.txt'
+train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
+# val_dataset_path = '/mnt/data3/zhaojunzhang/'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "加载DCVC的ME部分并冻结，跳过step1训练",
+    'describe': "完全按照TCM5步配置训练，使用vimeo_90k全部数据作为训练集，UVG数据作为测试集（和DVC一致）",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -33,20 +33,20 @@ train_args = {
     'i_frame_model_index': 0,
     'dcvc_model_path': "checkpoints/model_dcvc_quality_0_psnr.pth",
     'test_dataset_config': "dataset_config.json",
-    'worker': 1,
+    'worker': 4,
     'cuda': True,
-    'cuda_device': 0,
+    'cuda_device': 1,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 64,
+    "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
-    "epochs": 12,
+    "epochs": 16,
     "seed": 0,
-    "border_of_steps": [0, 3, 6],
+    "border_of_steps": [1, 4, 7, 10],
     "lr_set": {
-        "me1": 1e-5,
+        "me1": 1e-4,
         "me2": 1e-4,
         "reconstruction": 1e-4,
         "contextual_coding": 1e-4,
@@ -122,10 +122,10 @@ class Trainer(Module):
                         ]
 
         # 加载ME
-        load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
-        whole_module_state_dict = torch.load("checkpoints/model_dcvc_quality_0_psnr.pth")
-        for module in self.load_list:
-            load_submodule_params_(module[0], whole_module_state_dict, module[1])
+        # load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
+        # whole_module_state_dict = torch.load("checkpoints/model_dcvc_quality_0_psnr.pth")
+        # for module in self.load_list:
+        #     load_submodule_params_(module[0], whole_module_state_dict, module[1])
 
         # 加载到 gpu
         self.device = torch.device('cuda', args['cuda_device']) if args['cuda'] else torch.device('cpu')
@@ -167,31 +167,30 @@ class Trainer(Module):
         
     
     def schedule(self):
-        # if self.current_epoch == 0:
-        #     self.step = 1
-        #     self.step_name = 'me1'
-        #     # freeze_submodule([self.video_net.opticFlow])
-        #     self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
-        # elif self.current_epoch == borders_of_steps[0]:
-        #     # self.step = 2
-        #     # self.step_name = "me2"
-        #     # unfreeze_submodule(self.freeze_list)
-        #     # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step-1])
-        #     pass
-        if self.current_epoch == borders_of_steps[0]:
+        if self.current_epoch == 0:
+            self.step = 1
+            self.step_name = 'me1'
+            # freeze_submodule([self.video_net.opticFlow])
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+        elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
+            self.step_name = "me2"
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+            pass
+        elif self.current_epoch == borders_of_steps[1]:
+            self.step = 3
             self.step_name = "reconstruction"
             freeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
-        elif self.current_epoch == borders_of_steps[1]:
-            self.step = 3
+        elif self.current_epoch == borders_of_steps[2]:
+            self.step = 4
             self.step_name = "contextual_coding"
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
-        elif self.current_epoch == borders_of_steps[2]:
-            self.step = 4
+        elif self.current_epoch == borders_of_steps[3]:
+            self.step = 5
             self.step_name = "all"
-            # unfreeze_submodule(self.freeze_list)
+            unfreeze_submodule(self.freeze_list)
             self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
 
         loss_settings = dict()
@@ -199,17 +198,16 @@ class Trainer(Module):
         loss_settings["step"] = self.step
         loss_settings["name"] = self.step_name
 
-        if self.step == 1: # or self.step == 2: 
+        if self.step == 1 or self.step == 2: 
             loss_settings["D-item"] = "x_tilde_dist" 
         else:
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        # 不训练ME
-        # if self.step == 2 or self.step == 5 or self.step == 1:
-        #     loss_settings["R-item"].append("mv_latent_rate") # gt 
-        #     loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 3 or self.step == 4:
+        if self.step == 2 or self.step == 5:
+            loss_settings["R-item"].append("mv_latent_rate") # gt 
+            loss_settings["R-item"].append("mv_prior_rate") # st
+        if self.step == 4 or self.step == 5:
             loss_settings["R-item"].append("frame_latent_rate") # yt
             loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 
@@ -311,7 +309,7 @@ class Trainer(Module):
         return loss, quality, output_p["bpp_mv_y"], output_p["bpp_mv_z"], output_p["bpp_y"], output_p["bpp_z"], output_p["bpp"]
 
     def validation_step(self, batch, img_idx, output_folder):
-        input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
+        input_image, ref_image = batch
         
         ref_image = ref_image.to(self.device)
         input_image = input_image.to(self.device)
@@ -391,7 +389,10 @@ if __name__ == "__main__":
 
     trainer = Trainer(train_args)
     dataset = DataSet(train_dataset_path)
-    val_dataset = RawDataSet(val_dataset_path)
+    # val_dataset = RawDataSet(val_dataset_path)
+    # 使用UVG
+    val_dataset = UVGDataSet(testfull=True)
+
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=train_args['worker'])
 
@@ -426,7 +427,7 @@ if __name__ == "__main__":
         bpp_zs = []
         bpps = []
         for batch_idx, (input_image, ref_image) in enumerate(val_dataloader):
-            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.validation_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), idx, save_folder)
+            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.validation_step((input_image, ref_image), idx, save_folder)
             idx += 1
             losses.append(loss)
             qualities.append(quality)

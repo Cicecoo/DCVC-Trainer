@@ -33,12 +33,12 @@ train_args = {
     'i_frame_model_index': 0,
     'dcvc_model_path': "checkpoints/model_dcvc_quality_0_psnr.pth",
     'test_dataset_config': "dataset_config.json",
-    'worker': 1,
+    'worker': 4,
     'cuda': True,
     'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 64,
+    "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
@@ -128,7 +128,7 @@ class Trainer(Module):
             load_submodule_params_(module[0], whole_module_state_dict, module[1])
 
         # 加载到 gpu
-        self.device = torch.device('cuda', args['cuda_device']) if args['cuda'] else torch.device('cpu')
+        self.device = torch.device("cuda" if args['cuda'] else "cpu")
         self.i_frame_net.to(self.device)
         self.i_frame_net.eval()
         self.video_net.to(self.device)

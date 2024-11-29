@@ -97,7 +97,7 @@ class Trainer(Module):
             pass
 
         # 加载到 gpu
-        self.device = torch.device("cuda" if args['cuda'] else "cpu")
+        self.device = torch.device('cuda', args['cuda_device']) if args['cuda'] else torch.device('cpu')
         self.i_frame_net.to(self.device)
         self.i_frame_net.eval()
         self.video_net.to(self.device)
@@ -208,10 +208,10 @@ class Trainer(Module):
         frame_prior_rate: R(zt)
     """
     loss_setting2output_obj = { # 最小化bpp来最大化压缩率
-        "mv_latent_rate": "bpp_mv_z",
-        "mv_prior_rate": "bpp_mv_y",
-        "frame_latent_rate": "bpp_z",
-        "frame_prior_rate": "bpp_y"
+        "mv_latent_rate": "bpp_mv_y",
+        "mv_prior_rate": "bpp_mv_z",
+        "frame_latent_rate": "bpp_y",
+        "frame_prior_rate": "bpp_z"
     }
 
     def loss(self, net_output, target):
