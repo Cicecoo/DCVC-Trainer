@@ -35,10 +35,10 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 4,
     'cuda': True,
-    'cuda_device': 1,
+    'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 64,
+    "batch_size": 32,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
@@ -46,11 +46,11 @@ train_args = {
     "seed": 0,
     "border_of_steps": [1, 4, 7, 10],
     "lr_set": {
-        "me1": 64e-4,
-        "me2": 64e-4,
-        "reconstruction": 64e-4,
-        "contextual_coding": 64e-4,
-        "all": 64e-4
+        "me1": 32e-4,
+        "me2": 32e-4,
+        "reconstruction": 32e-4,
+        "contextual_coding": 32e-4,
+        "all": 32e-4
         }
 }
 

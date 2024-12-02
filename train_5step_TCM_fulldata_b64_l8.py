@@ -35,7 +35,7 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 4,
     'cuda': True,
-    'cuda_device': 1,
+    'cuda_device': 2,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 64,
@@ -46,11 +46,11 @@ train_args = {
     "seed": 0,
     "border_of_steps": [1, 4, 7, 10],
     "lr_set": {
-        "me1": 64e-4,
-        "me2": 64e-4,
-        "reconstruction": 64e-4,
-        "contextual_coding": 64e-4,
-        "all": 64e-4
+        "me1": 8e-4,
+        "me2": 8e-4,
+        "reconstruction": 8e-4,
+        "contextual_coding": 8e-4,
+        "all": 8e-4
         }
 }
 

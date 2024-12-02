@@ -24,7 +24,7 @@ train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "完全按照TCM5步配置训练，batch 64，lr按线性缩放",
+    'describe': "完全按照TCM5步配置训练，batch 64，lr按二次缩放",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -35,10 +35,10 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 4,
     'cuda': True,
-    'cuda_device': 1,
+    'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 64,
+    "batch_size": 32,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
@@ -46,11 +46,11 @@ train_args = {
     "seed": 0,
     "border_of_steps": [1, 4, 7, 10],
     "lr_set": {
-        "me1": 64e-4,
-        "me2": 64e-4,
-        "reconstruction": 64e-4,
-        "contextual_coding": 64e-4,
-        "all": 64e-4
+        "me1": 6e-4,
+        "me2": 6e-4,
+        "reconstruction": 6e-4,
+        "contextual_coding": 6e-4,
+        "all": 6e-4
         }
 }
 

@@ -24,7 +24,7 @@ train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "完全按照TCM5步配置训练，batch 64，lr按线性缩放",
+    'describe': "完全按照TCM5步配置训练，batch 64，lr按二次缩放",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -35,7 +35,7 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 4,
     'cuda': True,
-    'cuda_device': 1,
+    'cuda_device': 3,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 64,
