@@ -10,6 +10,7 @@ from src.models.DCVC_net import DCVC_net
 from src.zoo.image import model_architectures as architectures
 from test_video import PSNR, ms_ssim, read_frame_to_torch
 from dvc_dataset import DataSet, RawDataSet, UVGDataSet
+from datasetVimeo import Vimeo90kDataset
 
 import wandb
 import matplotlib.pyplot as plt
@@ -19,12 +20,9 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
-# val_dataset_path = '/mnt/data3/zhaojunzhang/'
-
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "完全按照TCM5步配置训练，batch 64，lr按二次缩放",
+    'describe': "完全按照TCM5步配置训练，使用新的dataloader",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -35,7 +33,7 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 4,
     'cuda': True,
-    'cuda_device': 3,
+    'cuda_device': 1,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 64,
@@ -43,16 +41,21 @@ train_args = {
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
     "epochs": 16,
-    "seed": 0,
+    "seed": 19,
     "border_of_steps": [1, 4, 7, 10],
     "lr_set": {
-        "me1": 64e-4,
-        "me2": 64e-4,
-        "reconstruction": 64e-4,
-        "contextual_coding": 64e-4,
-        "all": 64e-4
-        }
+        "me1": 1e-4,
+        "me2": 1e-4,
+        "reconstruction": 1e-4,
+        "contextual_coding": 1e-4,
+        "all": 1e-4
+        },
+    "train_dataset": "all_trainlist.txt",
+    "val_dataset": "UVG1920x1080(1024)",
 }
+
+train_dataset_path = train_args["train_dataset"]
+# val_dataset_path = '/mnt/data3/zhaojunzhang/'
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
@@ -273,7 +276,7 @@ class Trainer(Module):
         with torch.no_grad():
             self.schedule() 
 
-        input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv = batch
+        input_image, ref_image = batch
         
         ref_image = ref_image.to(self.device)
         input_image = input_image.to(self.device)
@@ -387,8 +390,11 @@ if __name__ == "__main__":
 
     save_folder = get_save_folder()
 
+    print("save_folder", save_folder)
+
     trainer = Trainer(train_args)
-    dataset = DataSet(train_dataset_path)
+    # dataset = DataSet(train_dataset_path)
+    dataset = Vimeo90kDataset(data_file=train_args["train_dataset"])
     # val_dataset = RawDataSet(val_dataset_path)
     # 使用UVG
     val_dataset = UVGDataSet(testfull=True)
@@ -399,10 +405,10 @@ if __name__ == "__main__":
     for epoch in range(train_args['epochs']):
         # 训练
         trainer.current_epoch = epoch
-        for batch_idx, (input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv) in enumerate(dataloader):
+        for batch_idx, (input_image, ref_image) in enumerate(dataloader):
             # print(f"Epoch {epoch}, batch {batch_idx}")
             # print(input_image.shape, ref_image.shape)
-            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv), batch_idx)
+            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image), batch_idx)
             
             wandb.log({"loss": loss, "quality": quality})
             wandb.log({"epoch": epoch, "batch": batch_idx})

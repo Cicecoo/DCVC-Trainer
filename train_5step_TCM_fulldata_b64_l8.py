@@ -19,9 +19,6 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
-# val_dataset_path = '/mnt/data3/zhaojunzhang/'
-
 train_args = {
     'project': "DCVC-Trainer_remote",
     'describe': "完全按照TCM5步配置训练，batch 64，lr按线性缩放",
@@ -35,7 +32,7 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 4,
     'cuda': True,
-    'cuda_device': 2,
+    'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 64,
@@ -51,8 +48,13 @@ train_args = {
         "reconstruction": 8e-4,
         "contextual_coding": 8e-4,
         "all": 8e-4
-        }
+        },
+    "train_dataset": "/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt",
+    "val_dataset": "UVG1920x1080(1024)",
 }
+
+train_dataset_path = train_args["train_dataset"]
+# val_dataset_path = '/mnt/data3/zhaojunzhang/'
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
@@ -386,6 +388,8 @@ if __name__ == "__main__":
         random.seed(train_args["seed"])
 
     save_folder = get_save_folder()
+
+    print("save_folder", save_folder)
 
     trainer = Trainer(train_args)
     dataset = DataSet(train_dataset_path)
