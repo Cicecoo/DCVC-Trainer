@@ -23,7 +23,7 @@ import random
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "按照TCM5步配置训练，使用新的dataloader，batch4，训练时quant用add_noise代替（之前是quant - x + x）",
+    'describe': "按照TCM5步配置训练，使用新的dataloader，batch4，训练时quant用add_noise代替（之前是$datach(quant - x) + x$）",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
