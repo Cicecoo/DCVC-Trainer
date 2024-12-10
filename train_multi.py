@@ -24,7 +24,7 @@ import random
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "按照TCM加入Dual、Multi阶段，batch64",
+    'describe': "按照TCM加入Dual、Multi阶段，batch4",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -38,13 +38,13 @@ train_args = {
     'cuda_device': 1,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 64,
+    "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
     "epochs": 30,
     "seed": 19,
-    "border_of_steps":  [-1, -1, -4, -7, -10, 0, -1, -24, 1, 27, 30], # [0, 1, 4, 7, 10, 16, 21, 24, 25, 27, 30],
+    "border_of_steps": [0, 1, 4, 7, 10, 16, 21, 24, 25, 27, 30],
     "lr_set": {
         "single": {
             "me1": 1e-4,
@@ -63,8 +63,8 @@ train_args = {
             "ave_all2": 1e-5
         },
     },
-    "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/t_sep_trainlist.txt',
-    "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/t_sep_testlist.txt',
+    "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
+    "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
 }
 
 video_dir = '/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences'
@@ -424,7 +424,7 @@ class Trainer(Module):
         else:
             for output_p in output_list:
                 quality_list.append(ms_ssim(output_p['recon_image'], input_image, data_range=1.0).item())
-        quality = torch.mean(torch.stack(quality_list))
+        quality = np.mean(quality_list)
 
         bpp_mv_y = torch.mean(torch.stack([output_p["bpp_mv_y"] for output_p in output_list]))
         bpp_mv_z = torch.mean(torch.stack([output_p["bpp_mv_z"] for output_p in output_list]))
@@ -534,7 +534,6 @@ if __name__ == "__main__":
 
         if trainer.stage_flag == 1:
             # 由single阶段切换到dual阶段
-
             dataset = VimeoDatasetEx(video_dir=video_dir, text_split=train_args["train_dataset"], ref_num=2)
             dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
             trainer.stage_flag = 0
