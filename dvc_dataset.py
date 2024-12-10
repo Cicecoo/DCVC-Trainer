@@ -70,7 +70,7 @@ class DataSet(data.Dataset):
         input_image, ref_image = random_flip(input_image, ref_image)
 
         quant_noise_feature, quant_noise_z, quant_noise_mv = torch.nn.init.uniform_(torch.zeros_like(self.featurenoise), -0.5, 0.5), torch.nn.init.uniform_(torch.zeros_like(self.znoise), -0.5, 0.5), torch.nn.init.uniform_(torch.zeros_like(self.mvnois), -0.5, 0.5)
-        return input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv
+        return input_image, ref_image # , quant_noise_feature, quant_noise_z, quant_noise_mv
         
 class RawDataSet(data.Dataset):
     def __init__(self, path=vimeo_test_list_path):
