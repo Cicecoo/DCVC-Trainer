@@ -24,7 +24,7 @@ import random
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "按照TCM5步配置训练，参考MMVC重写dataloader，batch64",
+    'describe': "按照TCM5步配置训练，增加学习率调整策略(warmup+指数衰减)，增加fine-tuning",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -33,25 +33,29 @@ train_args = {
     'i_frame_model_index': 0,
     'dcvc_model_path': "checkpoints/model_dcvc_quality_0_psnr.pth",
     # 'test_dataset_config': "dataset_config.json",
-    'worker': 4,
+    'worker': 12,
     'cuda': True,
-    'cuda_device': 0,
+    'cuda_device': 2,
     'model_type': "psnr",
     'resume': False,
-    "batch_size": 64,
+    "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
-    "epochs": 16,
+    "epochs": 26,
     "seed": 19,
-    "border_of_steps": [1, 4, 7, 10],
+    "border_of_steps": [1, 4, 7, 10, 16],
     "lr_set": {
         "me1": 1e-4,
         "me2": 1e-4,
         "reconstruction": 1e-4,
         "contextual_coding": 1e-4,
-        "all": 1e-4
+        "all": 1e-4,
+        "fine_tuning": 1e-5
         },
+    "warmup_border": 4,
+    "decay_border": 20,
+    "decay_rate": 0.1,
     "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
     "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
 }
@@ -61,6 +65,7 @@ video_dir = '/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences'
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
 lr_set = train_args["lr_set"]
+decay_interval = train_args["epochs"] - train_args["decay_border"]
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -171,31 +176,49 @@ class Trainer(Module):
         
     
     def schedule(self):
+        update = False
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me1'
-            # freeze_submodule([self.video_net.opticFlow])
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+            # freeze_submodule([self.video_net.opticFlow])  
+            update = True     
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
-            self.step_name = "me2"
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+            self.step_name = "me2"      
+            update = True       
             pass
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 3
             self.step_name = "reconstruction"
-            freeze_submodule(self.freeze_list)
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+            freeze_submodule(self.freeze_list)  
+            update = True           
         elif self.current_epoch == borders_of_steps[2]:
             self.step = 4
             self.step_name = "contextual_coding"
-            # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+            # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"            
+            update = True 
         elif self.current_epoch == borders_of_steps[3]:
             self.step = 5
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=self.lr[self.step_name])
+            update = True 
+        elif self.current_epoch == borders_of_steps[4]:
+            self.step = 6
+            self.step_name = "fine_tuning"
+            update = True 
+
+        # 学习率调整
+        base_lr = self.lr[self.step_name]
+        current_lr = base_lr
+        if self.current_epoch < train_args["warmup_border"]:
+            current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
+            update = True
+        elif self.current_epoch >= train_args["decay_border"]:
+            current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
+            update = True
+
+        if update:
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
 
         loss_settings = dict()
         self.loss_settings.clear()
@@ -448,6 +471,8 @@ if __name__ == "__main__":
 
         wandb.log({"val_loss": ave_loss, "val_quality": ave_quality, "epoch": epoch})
         wandb.log({"val_bpp_mv_y": ave_bpp_mv_y, "val_bpp_mv_z": ave_bpp_mv_z, "val_bpp_y": ave_bpp_y, "val_bpp_z": ave_bpp_z, "val_bpp": ave_bpp, "epoch": epoch})
+        print(f"Epoch {epoch}, val_loss: {ave_loss}, val_quality({train_args['model_type']}): {ave_quality}")
+        print(f"Epoch {epoch}, val_bpp_mv_y: {ave_bpp_mv_y}, val_bpp_mv_z: {ave_bpp_mv_z}, val_bpp_y: {ave_bpp_y}, val_bpp_z: {ave_bpp_z}, val_bpp: {ave_bpp}")
 
         group = "step" + str(trainer.step)
         wandb.log({f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, "epoch": epoch})
