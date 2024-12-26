@@ -40,7 +40,7 @@ train_args = {
     'resume': False,
     "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
-    "quality": 3,   # in [3、4、5、6]
+    "quality": 3,   # in [3、4、5、6] 
     "gop": 10,
     "epochs": 26,
     "seed": 19,

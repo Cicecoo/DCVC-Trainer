@@ -35,7 +35,7 @@ train_args = {
     # 'test_dataset_config': "dataset_config.json",
     'worker': 12,
     'cuda': True,
-    'cuda_device': 2,
+    'cuda_device': 3,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
@@ -110,13 +110,13 @@ class Trainer(Module):
 
         self.freeze_list = [self.video_net.opticFlow,
                             self.video_net.mvEncoder,
-                            self.video_net.mvpriorEncoder,
-                            self.video_net.mvpriorDecoder, # 是否需要?
-                            self.video_net.auto_regressive_mv,
-                            self.video_net.entropy_parameters_mv,
+                            # self.video_net.mvpriorEncoder,
+                            # self.video_net.mvpriorDecoder,l # 是否需要?
+                            # self.video_net.auto_regressive_mv,
+                            # self.video_net.entropy_parameters_mv,
                             self.video_net.mvDecoder_part1,
                             self.video_net.mvDecoder_part2,
-                            self.video_net.bitEstimator_z_mv
+                            # self.video_net.bitEstimator_z_mv
                             ]
         
         self.load_list = [
@@ -144,7 +144,7 @@ class Trainer(Module):
 
         # 优化器
         self.lr = lr_set
-        # self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
+        self.optimizer = optim.AdamW(self.video_net.parameters(), lr=1e-4)
 
         # 超参数
         self.metric = args['metric']
@@ -217,8 +217,12 @@ class Trainer(Module):
             current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
             update = True
 
+        print(f"update: {update}, current_lr: {current_lr}")
+
         if update:
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+            # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = current_lr
 
         loss_settings = dict()
         self.loss_settings.clear()
@@ -297,9 +301,6 @@ class Trainer(Module):
         return loss
 
     def training_step(self, batch, batch_idx):
-        with torch.no_grad():
-            self.schedule() 
-
         input_image, ref_image = batch
         
         ref_image = ref_image.to(self.device)
@@ -317,7 +318,7 @@ class Trainer(Module):
         self.optimizer.zero_grad()
         loss.backward()
         # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 必要吗？
-        clip_gradient(self.optimizer, 5)
+        clip_gradient(self.optimizer, 0.5)
         self.optimizer.step()
 
         # if self.step > 1:
@@ -423,6 +424,8 @@ if __name__ == "__main__":
     for epoch in range(train_args['epochs']):
         # 训练
         trainer.current_epoch = epoch
+        with torch.no_grad():
+            trainer.schedule() 
         for batch_idx, (input_image, ref_image) in enumerate(dataloader):
             # print(f"Epoch {epoch}, batch {batch_idx}")
             # print(input_image.shape, ref_image.shape)

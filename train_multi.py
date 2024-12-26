@@ -33,9 +33,9 @@ train_args = {
     'i_frame_model_index': 0,
     'dcvc_model_path': "checkpoints/model_dcvc_quality_0_psnr.pth",
     # 'test_dataset_config': "dataset_config.json",
-    'worker': 4,
+    'worker': 12,
     'cuda': True,
-    'cuda_device': 1,
+    'cuda_device': 2,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
@@ -178,7 +178,7 @@ class Trainer(Module):
         self.stage = None
         self.step = None
         self.step_name = None
-        self.stage_flag = 0
+        self.stage_flag = 0 
 
     def update_lr(self, lr):
         self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=lr)
