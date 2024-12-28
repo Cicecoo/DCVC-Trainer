@@ -24,7 +24,7 @@ import random
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "按照TCM加入Dual、Multi阶段，batch4",
+    'describe': "[24.12.28] 按照TCM加入Dual、Multi阶段，batch4",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
