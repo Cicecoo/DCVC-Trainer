@@ -235,10 +235,10 @@ class Trainer(Module):
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        if self.step == 2 or self.step == 5:
+        if self.step == 2 or self.step >= 5:
             loss_settings["R-item"].append("mv_latent_rate") # gt 
             loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 4 or self.step == 5:
+        if self.step == 4 or self.step >= 5:
             loss_settings["R-item"].append("frame_latent_rate") # yt
             loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 

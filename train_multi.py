@@ -63,6 +63,9 @@ train_args = {
             "ave_all2": 1e-5
         },
     },
+    "warmup_border": 4,
+    "decay_border": 16,
+    "decay_rate": 0.9,
     "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
     "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
 }
@@ -72,6 +75,7 @@ video_dir = '/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences'
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
 lr_set = train_args["lr_set"]
+decay_interval = train_args["epochs"] - train_args["decay_border"]
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -150,7 +154,7 @@ class Trainer(Module):
 
         # 优化器
         self.lr = lr_set
-        # self.optimizer = optim.AdamW(self.video_net.parameters(), lr=self.lr[0])
+        self.optimizer = optim.AdamW(self.video_net.parameters(), lr=1e-4)
 
         # 超参数
         self.metric = args['metric']
@@ -181,67 +185,93 @@ class Trainer(Module):
         self.stage_flag = 0 
 
     def update_lr(self, lr):
-        self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=lr)
+        # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=lr)
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
     
     def schedule(self):
+        base_lr = 1e-4
+        current_lr = base_lr
+        update = False
         if self.current_epoch == borders_of_steps[0]:
             self.stage = "single"
             self.step = 1
             self.step_name = 'me1'
             # freeze_submodule([self.video_net.opticFlow])
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[1]:
             self.stage = "single"
             self.step = 2
             self.step_name = "me2"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
             pass
         elif self.current_epoch == borders_of_steps[2]:
             self.stage = "single"
             self.step = 3
             self.step_name = "reconstruction"
             freeze_submodule(self.freeze_list)
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[3]:
             self.stage = "single"
             self.step = 4
             self.step_name = "contextual_coding"
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 
             # "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[4]:
             self.stage = "single"
             self.step = 5
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[5]:
             self.stage = "dual"
             self.stage_flag = 1
             self.step = 6
             self.step_name = "all"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[6]:
             self.stage = "multi"
             self.stage_flag = 2
             self.step = 7
             self.step_name = "all1"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[7]:
             self.stage = "multi"
             self.step = 8
             self.step_name = "all2"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[8]:
             self.stage = "multi"
             self.step = 9
             self.step_name = "ave_all1"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
         elif self.current_epoch == borders_of_steps[9]:
             self.stage = "multi"
             self.step = 10
             self.step_name = "ave_all2"
-            self.update_lr(lr_set[self.stage][self.step_name])
+            base_lr = lr_set[self.stage][self.step_name]
+            update = True
+
+        if self.current_epoch < train_args["warmup_border"]:
+            current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
+            update = True
+        elif self.current_epoch >= train_args["decay_border"]:
+            current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
+            update = True
+        
+        print(f"update: {update}, current_lr: {current_lr}")
+        if update:
+            self.update_lr(current_lr)    
 
         loss_settings = dict()
         self.loss_settings.clear()
@@ -254,10 +284,10 @@ class Trainer(Module):
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        if self.step == 2 or self.step == 5:
+        if self.step == 2 or self.step >= 5:
             loss_settings["R-item"].append("mv_latent_rate") # gt 
             loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 4 or self.step == 5:
+        if self.step == 4 or self.step >= 5:
             loss_settings["R-item"].append("frame_latent_rate") # yt
             loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 
@@ -596,6 +626,8 @@ if __name__ == "__main__":
 
         wandb.log({"val_loss": ave_loss, "val_quality": ave_quality, "epoch": epoch})
         wandb.log({"val_bpp_mv_y": ave_bpp_mv_y, "val_bpp_mv_z": ave_bpp_mv_z, "val_bpp_y": ave_bpp_y, "val_bpp_z": ave_bpp_z, "val_bpp": ave_bpp, "epoch": epoch})
+        print(f"Epoch {epoch}, val_loss: {ave_loss}, val_quality({train_args['model_type']}): {ave_quality}")
+        print(f"Epoch {epoch}, val_bpp_mv_y: {ave_bpp_mv_y}, val_bpp_mv_z: {ave_bpp_mv_z}, val_bpp_y: {ave_bpp_y}, val_bpp_z: {ave_bpp_z}, val_bpp: {ave_bpp}")
 
         group = "step" + str(trainer.step)
         wandb.log({f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, "epoch": epoch})
