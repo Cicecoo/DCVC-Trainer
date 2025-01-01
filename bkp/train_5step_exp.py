@@ -5,8 +5,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import Module
-# from src.models.DCVC_net_add_noise import DCVC_net
-from src.models.IBVC_DCVC_net import DCVC_net
+from src.models.DCVC_net_add_noise import DCVC_net
 # from src.models.DCVC_net_quant import DCVC_net
 # from src.models.DCVC_net_Spynet import DCVC_net
 from src.zoo.image import model_architectures as architectures
@@ -23,11 +22,9 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
-
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "[24.12.31] TCM + IBVC学习率策略，使用IBVC修改过的DCVC_net，数据集改为和polar_night_41一样",
+    'describe': "[24.12.28] 按照TCM5步配置训练，增加学习率调整策略(warmup+指数衰减)，增加fine-tuning",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -35,10 +32,10 @@ train_args = {
                            "checkpoints/cheng2020-anchor-6-4c052b1a.pth.tar"],
     'i_frame_model_index': 0,
     'dcvc_model_path': "checkpoints/model_dcvc_quality_0_psnr.pth",
-    'test_dataset_config': "dataset_config.json",
+    # 'test_dataset_config': "dataset_config.json",
     'worker': 12,
     'cuda': True,
-    'cuda_device': 1,
+    'cuda_device': 3,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
@@ -57,14 +54,13 @@ train_args = {
         "fine_tuning": 1e-5
         },
     "warmup_border": 4,
-    "decay_border": 16,
+    "decay_border": 20,
     "decay_rate": 0.1,
-    # "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
-    # "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
-    "train_dataset_path": train_dataset_path,
+    "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
+    "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
 }
 
-# video_dir = '/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences'
+video_dir = '/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences'
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
@@ -114,13 +110,13 @@ class Trainer(Module):
 
         self.freeze_list = [self.video_net.opticFlow,
                             self.video_net.mvEncoder,
-                            self.video_net.mvpriorEncoder,
-                            self.video_net.mvpriorDecoder, # 是否需要?
-                            self.video_net.auto_regressive_mv,
-                            self.video_net.entropy_parameters_mv,
+                            # self.video_net.mvpriorEncoder,
+                            # self.video_net.mvpriorDecoder,l # 是否需要?
+                            # self.video_net.auto_regressive_mv,
+                            # self.video_net.entropy_parameters_mv,
                             self.video_net.mvDecoder_part1,
                             self.video_net.mvDecoder_part2,
-                            self.video_net.bitEstimator_z_mv
+                            # self.video_net.bitEstimator_z_mv
                             ]
         
         self.load_list = [
@@ -174,7 +170,7 @@ class Trainer(Module):
         #                     ]
 
         
-        self.step = 0
+        self.step = None
         self.step_name = None
 
         
@@ -224,9 +220,9 @@ class Trainer(Module):
         print(f"update: {update}, current_lr: {current_lr}")
 
         if update:
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
-            # for param_group in self.optimizer.param_groups:
-            #     param_group['lr'] = current_lr
+            # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = current_lr
 
         loss_settings = dict()
         self.loss_settings.clear()
@@ -305,9 +301,7 @@ class Trainer(Module):
         return loss
 
     def training_step(self, batch, batch_idx):
-        self.video_net.train()
-        # input_image, ref_image = batch
-        input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv, quant_noise_z_mv = (x.to(self.device) for x in batch)
+        input_image, ref_image = batch
         
         ref_image = ref_image.to(self.device)
         input_image = input_image.to(self.device)
@@ -317,11 +311,7 @@ class Trainer(Module):
             output_i = self.i_frame_net(ref_image)
             ref_image = output_i['x_hat']
 
-        output_p = self.video_net.forward(
-            referframe=ref_image, input_image=input_image, 
-            quant_noise_feature=quant_noise_feature, quant_noise_z=quant_noise_z, 
-            quant_noise_mv=quant_noise_mv, quant_noise_z_mv=quant_noise_z_mv
-            )
+        output_p = self.video_net.forward(referframe=ref_image, input_image=input_image)
 
         loss = self.loss(output_p, input_image)
 
@@ -340,8 +330,6 @@ class Trainer(Module):
         return loss, quality, output_p["bpp_mv_y"], output_p["bpp_mv_z"], output_p["bpp_y"], output_p["bpp_z"], output_p["bpp"]
 
     def validation_step(self, batch, img_idx, output_folder):
-        self.video_net.eval()
-
         input_image, ref_image = batch
         
         ref_image = ref_image.to(self.device)
@@ -423,13 +411,12 @@ if __name__ == "__main__":
     print("save_folder", save_folder)
 
     trainer = Trainer(train_args)
-    # dataset = VimeoDataset(video_dir=video_dir, text_split=train_args["train_dataset"])
+    dataset = VimeoDataset(video_dir=video_dir, text_split=train_args["train_dataset"])
     # dataset = Vimeo90kDataset(data_file=train_args["train_dataset"])
-    dataset = DataSet(train_dataset_path)
     # val_dataset = RawDataSet(val_dataset_path)
     # 使用UVG
-    val_dataset = UVGDataSet(testfull=True)
-    # val_dataset = VimeoDataset(video_dir=video_dir, text_split=train_args["test_dataset"], test=True)
+    # val_dataset = UVGDataSet(testfull=True)
+    val_dataset = VimeoDataset(video_dir=video_dir, text_split=train_args["test_dataset"], test=True)
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=train_args['batch_size'], shuffle=True, num_workers=train_args['worker'])
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=train_args['worker'])
@@ -439,12 +426,10 @@ if __name__ == "__main__":
         trainer.current_epoch = epoch
         with torch.no_grad():
             trainer.schedule() 
-        # for batch_idx, (input_image, ref_image) in enumerate(dataloader):
-        for batch_idx, batch in enumerate(dataloader):
+        for batch_idx, (input_image, ref_image) in enumerate(dataloader):
             # print(f"Epoch {epoch}, batch {batch_idx}")
             # print(input_image.shape, ref_image.shape)
-            # loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image), batch_idx)
-            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step(batch, batch_idx)
+            loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image), batch_idx)
             
             wandb.log({"loss": loss, "quality": quality})
             wandb.log({"epoch": epoch, "batch": batch_idx})

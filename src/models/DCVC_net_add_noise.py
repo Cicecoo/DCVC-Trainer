@@ -17,14 +17,14 @@ class DCVC_net(nn.Module):
     def __init__(self):
         super().__init__()
         out_channel_mv = 128 # 运动向量的输出通道数
-        out_channel_N = 64  
+        out_channel_N = 64
         out_channel_M = 96
 
         self.out_channel_mv = out_channel_mv
         self.out_channel_N = out_channel_N
         self.out_channel_M = out_channel_M
 
-        self.bitEstimator_z = BitEstimator(out_channel_N) # BitEstimator：
+        self.bitEstimator_z = BitEstimator(out_channel_N)
         self.bitEstimator_z_mv = BitEstimator(out_channel_N)
 
         self.feature_extract = nn.Sequential(
@@ -464,82 +464,58 @@ class DCVC_net(nn.Module):
         return x + noise
 
     def forward(self, referframe, input_image):
-        # print("forward")
-        # print(referframe.shape)
-        # print(input_image.shape)
-        # Figure 2 的橙色部分
-        # [1]
-        estmv = self.opticFlow(input_image, referframe) # 光流估计运动向量
-        mvfeature = self.mvEncoder(estmv)   # 为什么编码后作为特征？mvEncoder做了什么？
-        z_mv = self.mvpriorEncoder(mvfeature)   # z 代表什么？ —— latent vector？z 常表示潜在特征空间
-        # compressed_z_mv = torch.round(z_mv) # 量化：或许就如命名 compressed 一样，此处量化只是减小空间开销？
+        estmv = self.opticFlow(input_image, referframe)
+        mvfeature = self.mvEncoder(estmv)
+        z_mv = self.mvpriorEncoder(mvfeature)
+
         compressed_z_mv = self.add_noise(z_mv)
         
-        # [2]
-        params_mv = self.mvpriorDecoder(compressed_z_mv) # 解码，为什么要 编码+量化+解码？为了引入量化？为了压缩？
-        # params_mv，作为什么的参数？如果 编码+量化+解码 只是为了引入量化，那么params_mv地位应该等同于mvfeature，但之后又单独量化了mvfeature
-        
-        # [3]
-        # quant_mv = torch.round(mvfeature)   # 单独量化 mvfeature
+        params_mv = self.mvpriorDecoder(compressed_z_mv)
+
         quant_mv = self.add_noise(mvfeature)
 
-        ctx_params_mv = self.auto_regressive_mv(quant_mv) # 自回归编码，为什么要自回归编码？
-        # 为mv的每个值引入上下文信息？
-        gaussian_params_mv = self.entropy_parameters_mv(  # 
-            torch.cat((params_mv, ctx_params_mv), dim=1)  # 拼接 mvPriorDecoder([mvPriorEncoder(mvfeature)]) 和 auto_regressive([mvfeature]) 
-        )   # 熵编码的定义：对于一个给定的信息源，用最少的比特数来编码这个信息源；输入：信息源；输出：编码后的信息
-        # 熵编码与分布的关系：熵编码将出现概率大的信息用较短的编码表示，出现概率小的信息用较长的编码表示，而概率分布描述了信息出现的概率
-        # 此处不是进行熵编码，而是进行熵参数的估计，即对于给定的信息源，估计其概率分布
-        # 这里假设 mvfeature 的分布是高斯分布？用特征 预测 高斯分布的参数
-        means_hat_mv, scales_hat_mv = gaussian_params_mv.chunk(2, 1) # 从预测的参数中分离出均值和标准差（位置和规模）
+        ctx_params_mv = self.auto_regressive_mv(quant_mv)
+        gaussian_params_mv = self.entropy_parameters_mv(
+            torch.cat((params_mv, ctx_params_mv), dim=1)
+        )
+        
+        means_hat_mv, scales_hat_mv = gaussian_params_mv.chunk(2, 1)
 
-        # [4]
-        quant_mv_upsample = self.mvDecoder_part1(quant_mv) # 上采样，为了恢复到合适的分辨率（原始尺寸）进行运动补偿？
-        quant_mv_upsample_refine = self.mv_refine(referframe, quant_mv_upsample) # 注意是mv_refine而不是context_refine
-        # 是因为单单对mv进行上采样信息不够？mv_refine的卷积学到的是什么？
-        context = self.motioncompensation(referframe, quant_mv_upsample_refine) # 此处motioncompensation包含了原文的feature extractor和context refine
-        # 虽然叫motioncompensation，但除了运动补偿还包含了原文的feature extractor和context refine，
-        # 除开二者，所以flow_warp对应原文的warp？
+        quant_mv_upsample = self.mvDecoder_part1(quant_mv)
+        
+        quant_mv_upsample_refine = self.mv_refine(referframe, quant_mv_upsample)
 
-        # 熵模型部分 （Figure 3）
-        # 得到 temporal_prior_params
-        temporal_prior_params = self.temporalPriorEncoder(context) # 因为 context 是运动补偿后的结果（有光流带来的帧间关系），所以这里是时域先验？
-        # 得到 params 除去了 temporal_prior_params 和 ctx_params，所以此处对应原文的 hyperprior？
+        context = self.motioncompensation(referframe, quant_mv_upsample_refine)
+
+        temporal_prior_params = self.temporalPriorEncoder(context)
+
         feature = self.contextualEncoder(torch.cat((input_image, context), dim=1))
         z = self.priorEncoder(feature)
 
         compressed_z = self.add_noise(z)
-        # compressed_z = torch.round(z) # 量化后都称为compressed？
 
-        # [6]
-        params = self.priorDecoder(compressed_z) # 得到 ctx_params
+        params = self.priorDecoder(compressed_z)
 
-        # [7]
-        feature_renorm = feature # ? renorm，就像mvfeature一样，单独又量化了一次
+        feature_renorm = feature
 
         compressed_y_renorm = self.add_noise(feature_renorm)
-        # compressed_y_renorm = torch.round(feature_renorm)
 
-        ctx_params = self.auto_regressive(compressed_y_renorm) # 自回归引入空间上下文信息
-        # 综合使用 temporal_prior_params, params, ctx_params 估计分布的参数
+        ctx_params = self.auto_regressive(compressed_y_renorm)
         gaussian_params = self.entropy_parameters(
             torch.cat((temporal_prior_params, params, ctx_params), dim=1)
         )
         means_hat, scales_hat = gaussian_params.chunk(2, 1)
 
-        # [8]
+
         recon_image_feature = self.contextualDecoder_part1(compressed_y_renorm)
         recon_image = self.contextualDecoder_part2(torch.cat((recon_image_feature, context), dim=1))
-        # 如果用 compressed_y_renorm 和 context 就可以重建图像，那为什么要估计 means_hat 和 scales_hat？
 
-        # [9]
-        total_bits_y, _ = self.feature_probs_based_sigma(  # 用高斯分布的参数估计压缩后的比特数（没有真正压缩)
-            feature_renorm, means_hat, scales_hat)
+
+        total_bits_y, _ = self.feature_probs_based_sigma(feature_renorm, means_hat, scales_hat)
         total_bits_mv, _ = self.feature_probs_based_sigma(mvfeature, means_hat_mv, scales_hat_mv)
         total_bits_z, _ = self.iclr18_estrate_bits_z(compressed_z)
         total_bits_z_mv, _ = self.iclr18_estrate_bits_z_mv(compressed_z_mv)
 
-        # [10]
         im_shape = input_image.size()
         pixel_num = im_shape[0] * im_shape[2] * im_shape[3]
         bpp_y = total_bits_y / pixel_num
