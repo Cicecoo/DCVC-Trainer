@@ -27,7 +27,7 @@ train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "[25.1.1] epoch 7 bbp_z 骤降问题，可能是重建质量不够？为 reconstruction 和 context_coding 阶段添加 warmup",
+    'describe': "[24.12.31] TCM + IBVC学习率策略，使用IBVC修改过的DCVC_net，数据集改为和polar_night_41一样",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -114,13 +114,13 @@ class Trainer(Module):
 
         self.freeze_list = [self.video_net.opticFlow,
                             self.video_net.mvEncoder,
-                            # self.video_net.mvpriorEncoder,
-                            # self.video_net.mvpriorDecoder, # 是否需要?
-                            # self.video_net.auto_regressive_mv,
-                            # self.video_net.entropy_parameters_mv,
+                            self.video_net.mvpriorEncoder,
+                            self.video_net.mvpriorDecoder, # 是否需要?
+                            self.video_net.auto_regressive_mv,
+                            self.video_net.entropy_parameters_mv,
                             self.video_net.mvDecoder_part1,
                             self.video_net.mvDecoder_part2,
-                            # self.video_net.bitEstimator_z_mv
+                            self.video_net.bitEstimator_z_mv
                             ]
         
         self.load_list = [
@@ -215,12 +215,6 @@ class Trainer(Module):
         current_lr = base_lr
         if self.current_epoch < train_args["warmup_border"]:
             current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
-            update = True
-        elif self.step_name == 'reconstruction':
-            current_lr = base_lr * (self.current_epoch - borders_of_steps[1] + 1) / (borders_of_steps[2] - borders_of_steps[1])
-            update = True
-        elif self.step_name == 'contextual_coding':
-            current_lr = base_lr * (self.current_epoch - borders_of_steps[2] + 1) / (borders_of_steps[3] - borders_of_steps[2])
             update = True
         elif self.current_epoch >= train_args["decay_border"]:
             current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
