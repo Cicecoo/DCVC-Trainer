@@ -23,7 +23,7 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt' # mini_dvc_test_val_1k.txt'
+train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt' #mini_dvc_test_val_1k.txt' # 
 
 train_args = {
     'project': "DCVC-Trainer_remote",
@@ -38,7 +38,7 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 12,
     'cuda': True,
-    'cuda_device': 2,
+    'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
@@ -46,7 +46,7 @@ train_args = {
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
     "epochs": 26,
-    "seed": 19,
+    "seed": 428571,
     "border_of_steps": [4, 7, 10, 16], #[1, 4, 7, 10, 16],
     "lr_set": {
         # "me1": 1e-4,
@@ -69,7 +69,6 @@ train_args = {
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
 lr_set = train_args["lr_set"]
-decay_interval = train_args["epochs"] - train_args["decay_border"]
 
 # 此处 index 对应文中 quality index
 # lambda来自于文中3.4及附录
@@ -148,7 +147,7 @@ class Trainer(Module):
 
         # 优化器
         self.lr = lr_set
-        self.optimizer = optim.AdamW(self.video_net.parameters(), lr=1e-4)
+        # self.optimizer = optim.AdamW(self.video_net.parameters(), lr=1e-4)
 
         # 超参数
         self.metric = args['metric']
@@ -158,21 +157,6 @@ class Trainer(Module):
         # 初始化
         self.current_epoch = 0
         self.loss_settings = dict()
-
-        # self.freeze_list1 = [self.video_net.bitEstimator_z,
-        #                     self.video_net.feature_extract,
-        #                     self.video_net.context_refine,
-        #                     # self.video_net.gaussian_encoder,
-        #                     self.video_net.contextualEncoder,
-        #                     self.video_net.contextualDecoder_part1,
-        #                     self.video_net.contextualDecoder_part2, 
-        #                     self.video_net.priorEncoder,
-        #                     self.video_net.priorDecoder,
-        #                     self.video_net.entropy_parameters, 
-        #                     self.video_net.auto_regressive,
-        #                     self.video_net.temporalPriorEncoder
-        #                     ]
-
         self.step = 0
         self.step_name = None
 
@@ -205,6 +189,7 @@ class Trainer(Module):
             self.step_name = "fine_tuning"
 
         # 学习率调整
+        # decay_interval = train_args["epochs"] - train_args["decay_border"]
         # base_lr = self.lr[self.step_name]
         # current_lr = base_lr
         # if self.current_epoch < train_args["warmup_border"]:
@@ -276,9 +261,9 @@ class Trainer(Module):
         for item in self.loss_settings["R-item"]:
             R_item += net_output[self.loss_setting2output_obj[item]]
 
-        print("lambda", lambda_set[self.metric][self.quality_index])
-        print("D_item", D_item)
-        print("R_item", R_item)
+        # print("lambda", lambda_set[self.metric][self.quality_index])
+        # print("D_item", D_item)
+        # print("R_item", R_item)
         # print("bpp_mv_y", net_output["bpp_mv_y"])
         # print("bpp_mv_z", net_output["bpp_mv_z"])
         # print("bpp_y", net_output["bpp_y"])

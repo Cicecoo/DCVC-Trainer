@@ -35,7 +35,7 @@ train_args = {
     # 'test_dataset_config': "dataset_config.json",
     'worker': 12,
     'cuda': True,
-    'cuda_device': 2,
+    'cuda_device': 0,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
