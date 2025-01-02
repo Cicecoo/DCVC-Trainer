@@ -27,7 +27,7 @@ train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt' # mini_d
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "[25.1.1] epoch 7 bbp_z 骤降问题，可能是重建质量不够？为 reconstruction 和 context_coding 阶段添加 warmup",
+    'describe': "[25.1.2] epoch 7 bbp_z 骤降问题，不添加学习率调整，每轮重置优化器",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -47,18 +47,18 @@ train_args = {
     "gop": 10,
     "epochs": 26,
     "seed": 19,
-    "border_of_steps": [1, 4, 7, 10, 16],
+    "border_of_steps": [4, 7, 10, 16], #[1, 4, 7, 10, 16],
     "lr_set": {
-        "me1": 1e-4,
-        "me2": 1e-4,
+        # "me1": 1e-4,
+        "me": 1e-4,
         "reconstruction": 1e-4,
         "contextual_coding": 1e-4,
         "all": 1e-4,
         "fine_tuning": 1e-5
         },
-    "warmup_border": 4,
-    "decay_border": 16,
-    "decay_rate": 0.5,
+    "warmup_border": None,
+    "decay_border": None,
+    "decay_rate": None,
     # "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
     # "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
     "train_dataset_path": train_dataset_path,
@@ -179,92 +179,77 @@ class Trainer(Module):
         
     
     def schedule(self):
-        update = False
         if self.current_epoch == 0:
             self.step = 1
-            self.step_name = 'me1'
+            self.step_name = 'me'
             # freeze_submodule([self.video_net.opticFlow])  
-            update = True     
+        # elif self.current_epoch == borders_of_steps[0]:
+        #     self.step = 2
+        #     self.step_name = "me2"      
+        #     update = True       
+        #     pass
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 2
-            self.step_name = "me2"      
-            update = True       
-            pass
+            self.step_name = "reconstruction"
+            freeze_submodule(self.freeze_list)        
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 3
-            self.step_name = "reconstruction"
-            freeze_submodule(self.freeze_list)  
-            update = True           
-        elif self.current_epoch == borders_of_steps[2]:
-            self.step = 4
             self.step_name = "contextual_coding"
             # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"            
-            update = True 
-        elif self.current_epoch == borders_of_steps[3]:
-            self.step = 5
+        elif self.current_epoch == borders_of_steps[2]:
+            self.step = 4
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
-            update = True 
-        elif self.current_epoch == borders_of_steps[4]:
-            self.step = 6
+        elif self.current_epoch == borders_of_steps[3]:
+            self.step = 5
             self.step_name = "fine_tuning"
-            update = True 
 
         # 学习率调整
-        base_lr = self.lr[self.step_name]
-        current_lr = base_lr
-        if self.current_epoch < train_args["warmup_border"]:
-            current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
-            update = True
-        elif self.step_name == 'reconstruction':
-            current_lr = base_lr * (self.current_epoch - borders_of_steps[1] + 1) / (borders_of_steps[2] - borders_of_steps[1])
-            update = True
-        elif self.step_name == 'contextual_coding':
-            current_lr = base_lr * (self.current_epoch - borders_of_steps[2] + 1) / (borders_of_steps[3] - borders_of_steps[2])
-            update = True
-        elif self.current_epoch >= train_args["decay_border"]:
-            current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
-            update = True
+        # base_lr = self.lr[self.step_name]
+        # current_lr = base_lr
+        # if self.current_epoch < train_args["warmup_border"]:
+        #     current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
+        # elif self.step_name == 'reconstruction':
+        #     current_lr = base_lr * (self.current_epoch - borders_of_steps[1] + 1) / (borders_of_steps[2] - borders_of_steps[1])
+        # elif self.step_name == 'contextual_coding':
+        #     current_lr = base_lr * (self.current_epoch - borders_of_steps[2] + 1) / (borders_of_steps[3] - borders_of_steps[2])
+        # elif self.current_epoch >= train_args["decay_border"]:
+        #     current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
 
-        print(f"update: {update}, current_lr: {current_lr}")
+        # print(f"update: {update}, current_lr: {current_lr}")
 
-        if update:
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+        # if update:
+            # self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
             # for param_group in self.optimizer.param_groups:
             #     param_group['lr'] = current_lr
+
+        current_lr = self.lr[self.step_name]
+        self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
 
         loss_settings = dict()
         self.loss_settings.clear()
         loss_settings["step"] = self.step
         loss_settings["name"] = self.step_name
 
-        if self.step == 1 or self.step == 2: 
+        if self.step_name == "me":
             loss_settings["D-item"] = "x_tilde_dist" 
         else:
             loss_settings["D-item"] = "x_hat_dist"
         
         loss_settings["R-item"] = []
-        if self.step == 2 or self.step >= 5:
+        if self.step_name == "me" or self.step_name == "all" or self.step_name == "fine_tuning":
             loss_settings["R-item"].append("mv_latent_rate") # gt 
             loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 4 or self.step >= 5:
+        if self.step_name == "contextual_coding" or self.step_name == "all" or self.step_name == "fine_tuning":
             loss_settings["R-item"].append("frame_latent_rate") # yt
             loss_settings["R-item"].append("frame_prior_rate") # zt
         # 更新 trainer 的 loss_settings 
         self.loss_settings = loss_settings
-            
-    """ 
-    return value of DCVC_net.forward
-    其中 y 对应 feature，z 对应 latent code（feature 即 prior？）
-        {"bpp_mv_y": bpp_mv_y,
-         "bpp_mv_z": bpp_mv_z,
-         "bpp_y": bpp_y,
-         "bpp_z": bpp_z,
-         "bpp": bpp,
-         "recon_image": recon_image,
-         "context": context,
-         }
 
+        print(f"step: {self.step}, step_name: {self.step_name}, current_lr: {current_lr}")
+        print(f"loss_settings: {self.loss_settings}")
+        
+    """
     loss components:
         x_tilde_dist / x_hat_dist: D,
         mv_latent_rate: R(gt),
@@ -272,7 +257,7 @@ class Trainer(Module):
         frame_latent_rate: R(yt),
         frame_prior_rate: R(zt)
     """
-    loss_setting2output_obj = { # 最小化bpp来最大化压缩率
+    loss_setting2output_obj = {
         "mv_latent_rate": "bpp_mv_y",
         "mv_prior_rate": "bpp_mv_z",
         "frame_latent_rate": "bpp_y",
@@ -281,37 +266,29 @@ class Trainer(Module):
 
     def loss(self, net_output, target):
         # 失真
-        # warmup 时需要只获取运动补偿输出
         if self.loss_settings["D-item"] == "x_tilde_dist":
             D_item = F.mse_loss(net_output["x_tilde"], target)
-            # temp = torch.mean((net_output["x_tilde"] - target).pow(2))
-            # print("D_item", D_item)
-            # print("temp", temp)
-        else:
+        else: # x_hat_dist
             D_item = F.mse_loss(net_output["recon_image"], target) 
-        # loss = lambda_set[self.metric][self.quality_index] * D_item
-        # loss = 256 * D_item
 
         # 率
         R_item = 0
-        for component in self.loss_settings["R-item"]:
-            R_item += net_output[self.loss_setting2output_obj[component]]
+        for item in self.loss_settings["R-item"]:
+            R_item += net_output[self.loss_setting2output_obj[item]]
 
-        # print("lambda", lambda_set[self.metric][self.quality_index])
-        # print("D_item", D_item)
-        # print("R_item", R_item)
+        print("lambda", lambda_set[self.metric][self.quality_index])
+        print("D_item", D_item)
+        print("R_item", R_item)
         # print("bpp_mv_y", net_output["bpp_mv_y"])
         # print("bpp_mv_z", net_output["bpp_mv_z"])
         # print("bpp_y", net_output["bpp_y"])
         # print("bpp_z", net_output["bpp_z"])
 
         loss = lambda_set[self.metric][self.quality_index] * D_item + R_item
-        # loss = self.loss_settings["lr"] * loss 此为错误
         return loss
 
+
     def training_step(self, batch, batch_idx):
-        self.video_net.train()
-        # input_image, ref_image = batch
         input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv, quant_noise_z_mv = (x.to(self.device) for x in batch)
         
         ref_image = ref_image.to(self.device)
@@ -323,20 +300,22 @@ class Trainer(Module):
             ref_image = output_i['x_hat']
 
         output_p = self.video_net.forward(
-            referframe=ref_image, input_image=input_image, 
-            quant_noise_feature=quant_noise_feature, quant_noise_z=quant_noise_z, 
-            quant_noise_mv=quant_noise_mv, quant_noise_z_mv=quant_noise_z_mv
+            referframe=ref_image, 
+            input_image=input_image, 
+            quant_noise_feature=quant_noise_feature, 
+            quant_noise_z=quant_noise_z, 
+            quant_noise_mv=quant_noise_mv, 
+            quant_noise_z_mv=quant_noise_z_mv
             )
 
         loss = self.loss(output_p, input_image)
 
         self.optimizer.zero_grad()
         loss.backward()
-        # TODO  https://github.com/DeepMC-DCVC/DCVC/issues/8 必要吗？
+
         clip_gradient(self.optimizer, 0.5)
         self.optimizer.step()
 
-        # if self.step > 1:
         if train_args['model_type'] == 'psnr':
             quality = PSNR(output_p['recon_image'], input_image)
         else:
@@ -344,9 +323,8 @@ class Trainer(Module):
 
         return loss, quality, output_p["bpp_mv_y"], output_p["bpp_mv_z"], output_p["bpp_y"], output_p["bpp_z"], output_p["bpp"]
 
-    def validation_step(self, batch, img_idx, output_folder):
-        self.video_net.eval()
 
+    def validation_step(self, batch, img_idx, output_folder):
         input_image, ref_image = batch
         
         ref_image = ref_image.to(self.device)
@@ -369,6 +347,7 @@ class Trainer(Module):
                 quality = ms_ssim(output['recon_image'], input_image, data_range=1.0).item()
                 
         return loss, quality, output["bpp_mv_y"], output["bpp_mv_z"], output["bpp_y"], output["bpp_z"], output["bpp"]
+
 
     def visualization(self, epoch, net_ref_image, net_input_image, net_output, img_idx, output_folder):
         # 为每个权重创建一个与权重文件名相同的文件夹
@@ -408,14 +387,8 @@ class Trainer(Module):
         plt.savefig(img_save_path)
         plt.close(fig)
 
-if __name__ == "__main__": 
-    # optical_flow_model_path = "checkpoints/network-sintel-final.pytorch"
-    # ckpt = torch.load(optical_flow_model_path)
-    # print(ckpt.keys())
-    # print(len(ckpt.keys()))
-    # trainer = Trainer(train_args)
-    # exit()
 
+if __name__ == "__main__": 
     wandb.init(project=train_args["project"])
     wandb.config.update(train_args)
 
@@ -441,6 +414,7 @@ if __name__ == "__main__":
 
     for epoch in range(train_args['epochs']):
         # 训练
+        trainer.video_net.train()
         trainer.current_epoch = epoch
         with torch.no_grad():
             trainer.schedule() 
@@ -465,6 +439,7 @@ if __name__ == "__main__":
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
 
         # 验证
+        trainer.video_net.eval()
         idx = 0
         losses = []
         qualities = []
