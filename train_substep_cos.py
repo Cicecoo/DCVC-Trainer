@@ -22,12 +22,13 @@ import torch.nn as nn
 from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, get_save_folder, clip_gradient
 import random
 
-
+# set CUDA_VISIBLE_DEVICES=
 train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt' # mini_dvc_test_val_1k.txt' # 
+tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': "[25.1.3] 继承 genial-valley-106 （_exp_2），尝试通过添加初始化、增加轮数以及 warmup 改善 contextual coder 部分的训练效果",
+    'describe': f"[25.1.4] [{tag}] 继承 genial-valley-117 （_exp_init）",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -38,7 +39,7 @@ train_args = {
     'test_dataset_config': "dataset_config.json",
     'worker': 12,
     'cuda': True,
-    'cuda_device': 3,
+    'cuda_device': 2,
     'model_type': "psnr",
     'resume': False,
     "batch_size": 4,
@@ -53,26 +54,53 @@ train_args = {
         "me2": 1e-4,
         "reconstruction": 1e-4,
         "contextual_coding": 1e-4,
+        # "contextual_coding2": 1e-4,
         "all": 1e-4,
         "fine_tuning": 1e-5
         },
-    "warmup_border": 4,
-    "decay_border": 22,
-    "decay_rate": 0.1,
-    # "train_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_trainlist.txt',
-    # "test_dataset": '/mnt/data3/zhaojunzhang/vimeo_septuplet/sep_testlist.txt',
+    "warmup_border": None,
+    "decay_border": None,
+    "decay_rate": None,
     "train_dataset_path": train_dataset_path,
+    "loss_settings": {
+        "me1": {
+            "D-item": "x_tilde_dist",
+            "R-item": []
+        },
+        "me2": {
+            "D-item": "x_tilde_dist",
+            "R-item": ["mv_latent_rate", "mv_prior_rate"]
+        },
+        "reconstruction": {
+            "D-item": "x_hat_dist",
+            "R-item": []
+        },
+        # "contextual_coding1": {
+        #     "D-item": "x_hat_dist",
+        #     "R-item": ["frame_latent_rate"]
+        # },
+        "contextual_coding": {
+            "D-item": "x_hat_dist",
+            "R-item": ["frame_latent_rate", "frame_prior_rate"]
+        },
+        "all": {
+            "D-item": "x_hat_dist",
+            "R-item": ["mv_latent_rate", "mv_prior_rate", "frame_latent_rate", "frame_prior_rate"]
+        },
+        "fine_tuning": {
+            "D-item": "x_hat_dist",
+            "R-item": ["mv_latent_rate", "mv_prior_rate", "frame_latent_rate", "frame_prior_rate"]
+        }
+    }
 }
-
-# video_dir = '/mnt/data3/zhaojunzhang/vimeo_septuplet/sequences'
 
 # 1.mv warmup; 2.train excluding mv; 3.train excluding mv with bit cost; 4.train all
 borders_of_steps = train_args["border_of_steps"]
 lr_set = train_args["lr_set"]
-decay_interval = train_args["epochs"] - train_args["decay_border"]
+if train_args["decay_border"] is not None:
+    decay_interval = train_args["epochs"] - train_args["decay_border"]
 
-# 此处 index 对应文中 quality index
-# lambda来自于文中3.4及附录
+# 此处 index 对应文中 quality index，lambda来自于文中3.4及附录
 lambda_set = {
     "MSE": { # 对应psnr
         3: 256, 
@@ -115,7 +143,7 @@ class Trainer(Module):
         self.freeze_list = [self.video_net.opticFlow,
                             self.video_net.mvEncoder,
                             self.video_net.mvpriorEncoder,
-                            self.video_net.mvpriorDecoder, # 是否需要?
+                            self.video_net.mvpriorDecoder,
                             self.video_net.auto_regressive_mv,
                             self.video_net.entropy_parameters_mv,
                             self.video_net.mvDecoder_part1,
@@ -134,12 +162,6 @@ class Trainer(Module):
                         (self.video_net.bitEstimator_z_mv, "bitEstimator_z_mv")
                         ]
 
-        # 加载ME
-        # load_submodule_params(self.video_net.opticFlow, "checkpoints/model_dcvc_quality_0_psnr.pth", 'opticFlow')
-        # whole_module_state_dict = torch.load("checkpoints/model_dcvc_quality_0_psnr.pth")
-        # for module in self.load_list:
-        #     load_submodule_params_(module[0], whole_module_state_dict, module[1])
-
         # 加载到 gpu
         self.device = torch.device('cuda', args['cuda_device']) if args['cuda'] else torch.device('cpu')
         self.i_frame_net.to(self.device)
@@ -157,114 +179,63 @@ class Trainer(Module):
 
         # 初始化
         self.current_epoch = 0
-        self.loss_settings = dict()
-
-        # self.freeze_list1 = [self.video_net.bitEstimator_z,
-        #                     self.video_net.feature_extract,
-        #                     self.video_net.context_refine,
-        #                     # self.video_net.gaussian_encoder,
-        #                     self.video_net.contextualEncoder,
-        #                     self.video_net.contextualDecoder_part1,
-        #                     self.video_net.contextualDecoder_part2, 
-        #                     self.video_net.priorEncoder,
-        #                     self.video_net.priorDecoder,
-        #                     self.video_net.entropy_parameters, 
-        #                     self.video_net.auto_regressive,
-        #                     self.video_net.temporalPriorEncoder
-        #                     ]
-
-        self.step = 0
+        self.step = -1
         self.step_name = None
+        self.loss_items = None
 
-        
     
     def schedule(self):
-        update = False
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me1'
-            # freeze_submodule([self.video_net.opticFlow])  
-            update = True     
+            # freeze_submodule([self.video_net.opticFlow])    
         elif self.current_epoch == borders_of_steps[0]:
-            self.step = 2
-            self.step_name = "me2"      
-            update = True       
-            pass
+            self.step = 1
+            self.step_name = "me2"                
         elif self.current_epoch == borders_of_steps[1]:
-            self.step = 3
+            self.step = 2
             self.step_name = "reconstruction"
-            freeze_submodule(self.freeze_list)  
-            update = True           
+            freeze_submodule(self.freeze_list)                              
         elif self.current_epoch == borders_of_steps[2]:
-            self.step = 4
+            self.step = 3
             self.step_name = "contextual_coding"
-            # 根据 https://github.com/DeepMC-DCVC/DCVC/issues/8 "the whole optical motion estimation, MV encoding and decoding parts are fixed during this step"            
-            update = True 
+        # elif self.current_epoch == borders_of_steps[3]:
+        #     self.step = 3
+        #     self.step_name = "contextual_coding2"
         elif self.current_epoch == borders_of_steps[3]:
-            self.step = 5
+            self.step = 4
             self.step_name = "all"
             unfreeze_submodule(self.freeze_list)
-            update = True 
         elif self.current_epoch == borders_of_steps[4]:
-            self.step = 6
-            self.step_name = "fine_tuning"
-            update = True 
+            self.step = 5
+            self.step_name = "fine_tuning"            
 
         # 学习率调整
         base_lr = self.lr[self.step_name]
         current_lr = base_lr
-        if self.current_epoch < train_args["warmup_border"]:
-            current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
-            update = True
-        elif self.step_name == 'reconstruction' and self.current_epoch - borders_of_steps[1] < 4:
-            current_lr = base_lr * (self.current_epoch - borders_of_steps[1] + 1) / 4
-            update = True
-        elif self.step_name == 'contextual_coding' and self.current_epoch - borders_of_steps[2] < 4:
-            current_lr = base_lr * (self.current_epoch - borders_of_steps[2] + 1) / 4
-            update = True
-        elif self.current_epoch >= train_args["decay_border"]:
-            current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
-            update = True
+        # if self.current_epoch < train_args["warmup_border"]:
+        #     current_lr = base_lr * (self.current_epoch + 1) / train_args["warmup_border"]
+        # elif self.step_name.startswith('reconstruction') and self.current_epoch - borders_of_steps[1] < 4:
+        #     current_lr = base_lr * (self.current_epoch - borders_of_steps[1] + 1) / 4
+        # elif self.step_name.startswith('contextual_coding')  and self.current_epoch - borders_of_steps[3] < 4:
+        #     current_lr = base_lr * (self.current_epoch - borders_of_steps[3] + 1) / 4
+        # elif self.current_epoch >= train_args["decay_border"]:
+        #     current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
 
-        print(f"update: {update}, current_lr: {current_lr}")
-
-        if update:
-            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
-            # for param_group in self.optimizer.param_groups:
-            #     param_group['lr'] = current_lr
-
-        loss_settings = dict()
-        self.loss_settings.clear()
-        loss_settings["step"] = self.step
-        loss_settings["name"] = self.step_name
-
-        if self.step == 1 or self.step == 2: 
-            loss_settings["D-item"] = "x_tilde_dist" 
+        self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+        if self.step_name == "contextual_coding":
+            print(f"init scheduler: {self.step_name}, iters = {len(dataloader)} * {(borders_of_steps[2] - borders_of_steps[1])}")
+            iters = len(dataloader) * (borders_of_steps[3] - borders_of_steps[2])
+            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=iters, eta_min=0)
         else:
-            loss_settings["D-item"] = "x_hat_dist"
-        
-        loss_settings["R-item"] = []
-        if self.step == 2 or self.step >= 5:
-            loss_settings["R-item"].append("mv_latent_rate") # gt 
-            loss_settings["R-item"].append("mv_prior_rate") # st
-        if self.step == 4 or self.step >= 5:
-            loss_settings["R-item"].append("frame_latent_rate") # yt
-            loss_settings["R-item"].append("frame_prior_rate") # zt
-        # 更新 trainer 的 loss_settings 
-        self.loss_settings = loss_settings
+            self.scheduler = None
+
+        self.loss_items = train_args["loss_settings"][self.step_name]
+
+        print(f"step: {self.step}, step_name: {self.step_name}, current_lr: {current_lr}")
+        print(f"loss_items: {self.loss_items}")
             
     """ 
-    return value of DCVC_net.forward
-    其中 y 对应 feature，z 对应 latent code（feature 即 prior？）
-        {"bpp_mv_y": bpp_mv_y,
-         "bpp_mv_z": bpp_mv_z,
-         "bpp_y": bpp_y,
-         "bpp_z": bpp_z,
-         "bpp": bpp,
-         "recon_image": recon_image,
-         "context": context,
-         }
-
     loss components:
         x_tilde_dist / x_hat_dist: D,
         mv_latent_rate: R(gt),
@@ -282,20 +253,15 @@ class Trainer(Module):
     def loss(self, net_output, target):
         # 失真
         # warmup 时需要只获取运动补偿输出
-        if self.loss_settings["D-item"] == "x_tilde_dist":
+        if self.loss_items["D-item"] == "x_tilde_dist":
             D_item = F.mse_loss(net_output["x_tilde"], target)
-            # temp = torch.mean((net_output["x_tilde"] - target).pow(2))
-            # print("D_item", D_item)
-            # print("temp", temp)
         else:
             D_item = F.mse_loss(net_output["recon_image"], target) 
-        # loss = lambda_set[self.metric][self.quality_index] * D_item
-        # loss = 256 * D_item
 
         # 率
         R_item = 0
-        for component in self.loss_settings["R-item"]:
-            R_item += net_output[self.loss_setting2output_obj[component]]
+        for item in self.loss_items["R-item"]:
+            R_item += net_output[self.loss_setting2output_obj[item]]
 
         # print("lambda", lambda_set[self.metric][self.quality_index])
         # print("D_item", D_item)
@@ -306,7 +272,6 @@ class Trainer(Module):
         # print("bpp_z", net_output["bpp_z"])
 
         loss = lambda_set[self.metric][self.quality_index] * D_item + R_item
-        # loss = self.loss_settings["lr"] * loss 此为错误
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -378,9 +343,9 @@ class Trainer(Module):
 
         # 转换图像为可显示格式
         ref_image_np = net_ref_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
-        input_image_np = net_input_image[0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
-        warped_image_np = net_output['x_tilde'][0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
-        output_image_np = net_output['recon_image'][0].cpu().permute(1, 2, 0).numpy()  # [C, H, W] -> [H, W, C]
+        input_image_np = net_input_image[0].cpu().permute(1, 2, 0).numpy()
+        warped_image_np = net_output['x_tilde'][0].cpu().permute(1, 2, 0).numpy()
+        output_image_np = net_output['recon_image'][0].cpu().permute(1, 2, 0).numpy()
 
         # 反归一化
         ref_image_np = (ref_image_np * 255).astype(np.uint8)
@@ -409,13 +374,6 @@ class Trainer(Module):
         plt.close(fig)
 
 if __name__ == "__main__": 
-    # optical_flow_model_path = "checkpoints/network-sintel-final.pytorch"
-    # ckpt = torch.load(optical_flow_model_path)
-    # print(ckpt.keys())
-    # print(len(ckpt.keys()))
-    # trainer = Trainer(train_args)
-    # exit()
-
     wandb.init(project=train_args["project"])
     wandb.config.update(train_args)
 
@@ -443,26 +401,35 @@ if __name__ == "__main__":
         # 训练
         trainer.current_epoch = epoch
         with torch.no_grad():
-            trainer.schedule() 
-        # for batch_idx, (input_image, ref_image) in enumerate(dataloader):
+            trainer.schedule()
+        # cnt = 0
+        # t_losses = 0
+        # t_qualities = 0
+        # t_bpps = 0
         for batch_idx, batch in enumerate(dataloader):
-            # print(f"Epoch {epoch}, batch {batch_idx}")
-            # print(input_image.shape, ref_image.shape)
-            # loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step((input_image, ref_image), batch_idx)
             loss, quality, bpp_mv_y, bpp_mv_z, bpp_y, bpp_z, bpp = trainer.training_step(batch, batch_idx)
-            
-            wandb.log({"loss": loss, "quality": quality})
+            # cnt += 1
+            # t_losses += loss
+            # t_qualities += quality
+            # t_bpps += bpp
+
             wandb.log({"epoch": epoch, "batch": batch_idx})
-            wandb.log({"bpp_mv_y": bpp_mv_y, "bpp_mv_z": bpp_mv_z, "bpp_y": bpp_y, "bpp_z": bpp_z, "bpp": bpp})
+            wandb.log({"loss": loss, "quality": quality, "bpp": bpp})
+            wandb.log({"bpp_mv_y": bpp_mv_y, "bpp_mv_z": bpp_mv_z, "bpp_y": bpp_y, "bpp_z": bpp_z})
             group = "step" + str(trainer.step)
-            wandb.log({f"{group}_loss": loss, f"{group}_quality": quality})
-            wandb.log({f"{group}_bpp_mv_y": bpp_mv_y, f"{group}_bpp_mv_z": bpp_mv_z, f"{group}_bpp_y": bpp_y, f"{group}_bpp_z": bpp_z, f"{group}_bpp": bpp})
             wandb.log({f"{group}_epoch": epoch, f"{group}_batch": batch_idx})
+            wandb.log({f"{group}_loss": loss, f"{group}_quality": quality, f"{group}_bpp": bpp})
+            wandb.log({f"{group}_bpp_mv_y": bpp_mv_y, f"{group}_bpp_mv_z": bpp_mv_z, f"{group}_bpp_y": bpp_y, f"{group}_bpp_z": bpp_z})
             
-        print(f"Epoch {epoch}, batch {batch_idx}, loss: {loss}, quality({train_args['model_type']}): {quality}")
+        
+        # print(f"Epoch {epoch} {trainer.step_name}, batch {batch_idx}, loss: {t_losses / cnt}, quality({train_args['model_type']}): {t_qualities / cnt}, bpp: {t_bpps / cnt}")
 
         # save model
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
+
+        if trainer.scheduler is not None:
+            trainer.scheduler.step()
+
 
         # 验证
         idx = 0
@@ -492,12 +459,10 @@ if __name__ == "__main__":
         ave_bpp_z = sum(bpp_zs) / len(bpp_zs)
         ave_bpp = sum(bpps) / len(bpps)
 
-        wandb.log({"val_loss": ave_loss, "val_quality": ave_quality, "epoch": epoch})
-        wandb.log({"val_bpp_mv_y": ave_bpp_mv_y, "val_bpp_mv_z": ave_bpp_mv_z, "val_bpp_y": ave_bpp_y, "val_bpp_z": ave_bpp_z, "val_bpp": ave_bpp, "epoch": epoch})
-        print(f"Epoch {epoch}, val_loss: {ave_loss}, val_quality({train_args['model_type']}): {ave_quality}")
-        print(f"Epoch {epoch}, val_bpp_mv_y: {ave_bpp_mv_y}, val_bpp_mv_z: {ave_bpp_mv_z}, val_bpp_y: {ave_bpp_y}, val_bpp_z: {ave_bpp_z}, val_bpp: {ave_bpp}")
-
+        wandb.log({"epoch": epoch, "val_loss": ave_loss, "val_quality": ave_quality, "val_bpp": ave_bpp})
+        wandb.log({"val_bpp_mv_y": ave_bpp_mv_y, "val_bpp_mv_z": ave_bpp_mv_z, "val_bpp_y": ave_bpp_y, "val_bpp_z": ave_bpp_z})
+        print(f"Validation, epoch {epoch}, loss: {ave_loss}, quality({train_args['model_type']}): {ave_quality}, bpp: {ave_bpp}")
+        print(f"bpp_mv_y: {ave_bpp_mv_y}, bpp_mv_z: {ave_bpp_mv_z}, bpp_y: {ave_bpp_y}, bpp_z: {ave_bpp_z}")
         group = "step" + str(trainer.step)
-        wandb.log({f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, "epoch": epoch})
-        wandb.log({f"{group}_val_bpp_mv_y": ave_bpp_mv_y, f"{group}_val_bpp_mv_z": ave_bpp_mv_z, f"{group}_val_bpp_y": ave_bpp_y, f"{group}_val_bpp_z": ave_bpp_z, f"{group}_val_bpp": ave_bpp, "epoch": epoch})
-
+        wandb.log({"epoch": epoch, f"{group}_val_loss": ave_loss, f"{group}_val_quality": ave_quality, f"{group}_val_bpp": ave_bpp})
+        wandb.log({f"{group}_val_bpp_mv_y": ave_bpp_mv_y, f"{group}_val_bpp_mv_z": ave_bpp_mv_z, f"{group}_val_bpp_y": ave_bpp_y, f"{group}_val_bpp_z": ave_bpp_z})
