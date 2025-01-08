@@ -5,8 +5,8 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import Module
-# from src.models.DCVC_net_add_noise import DCVC_net
-from src.models.DCVC_net_full_init import DCVC_net
+from src.models.DCVC_net_add_noise import DCVC_net
+# from src.models.DCVC_net_full_init import DCVC_net
 # from src.models.DCVC_net_quant import DCVC_net
 # from src.models.DCVC_net_Spynet import DCVC_net
 from src.zoo.image import model_architectures as architectures
@@ -23,14 +23,14 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 # set CUDA_VISIBLE_DEVICES=
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt' #mini_dvc_test_val_1k.txt' #  
+train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_val_1k.txt' # test.txt' # 
 tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': f"[25.1.6] [{tag}] 继承 genial-valley-117 （_exp_init）",
+    'describe': f"[25.1.8] [{tag}] ME 部分已经比较好，问题还在 bpp_z；排除初始化的问题；添加余弦退火",
     'i_frame_model_name': "cheng2020-anchor",
-    'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
+    'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar",
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
                            "checkpoints/cheng2020-anchor-5-23852949.pth.tar",
                            "checkpoints/cheng2020-anchor-6-4c052b1a.pth.tar"],
@@ -46,15 +46,15 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
-    "epochs": 30,
+    "epochs": 25,
     "seed": 19,
-    "border_of_steps": [1, 4, 10, 13, 16, 22], #  [1, 4, 7, 10, 16],
+    "border_of_steps": [1, 4, 7, 13, 19], # [1, 4, 7, 10, 16],
     "lr_set": {
         "me1": 1e-4,
         "me2": 1e-4,
         "reconstruction": 1e-4,
-        "contextual_coding1": 1e-4,
-        "contextual_coding2": 1e-4,
+        "contextual_coding": 1e-4,
+        # "contextual_coding2": 1e-4,
         "all": 1e-4,
         "fine_tuning": 1e-5
         },
@@ -75,11 +75,11 @@ train_args = {
             "D-item": "x_hat_dist",
             "R-item": []
         },
-        "contextual_coding1": {
-            "D-item": "x_hat_dist",
-            "R-item": ["frame_latent_rate"]
-        },
-        "contextual_coding2": {
+        # "contextual_coding1": {
+        #     "D-item": "x_hat_dist",
+        #     "R-item": ["frame_latent_rate"]
+        # },
+        "contextual_coding": {
             "D-item": "x_hat_dist",
             "R-item": ["frame_latent_rate", "frame_prior_rate"]
         },
@@ -185,30 +185,37 @@ class Trainer(Module):
 
     
     def schedule(self):
+        update = False
         if self.current_epoch == 0:
             self.step = 1
             self.step_name = 'me1'
+            update = True
             # freeze_submodule([self.video_net.opticFlow])    
         elif self.current_epoch == borders_of_steps[0]:
             self.step = 1
-            self.step_name = "me2"                
+            self.step_name = "me2"
+            update = True
         elif self.current_epoch == borders_of_steps[1]:
             self.step = 2
             self.step_name = "reconstruction"
-            freeze_submodule(self.freeze_list)                              
+            update = True
+            freeze_submodule(self.freeze_list)
         elif self.current_epoch == borders_of_steps[2]:
             self.step = 3
-            self.step_name = "contextual_coding1"
+            self.step_name = "contextual_coding"
+            update = True
+        # elif self.current_epoch == borders_of_steps[3]:
+        #     self.step = 3
+        #     self.step_name = "contextual_coding2"
         elif self.current_epoch == borders_of_steps[3]:
-            self.step = 3
-            self.step_name = "contextual_coding2"
-        elif self.current_epoch == borders_of_steps[4]:
             self.step = 4
             self.step_name = "all"
+            update = True
             unfreeze_submodule(self.freeze_list)
-        elif self.current_epoch == borders_of_steps[5]:
+        elif self.current_epoch == borders_of_steps[4]:
             self.step = 5
             self.step_name = "fine_tuning"            
+            update = True
 
         # 学习率调整
         base_lr = self.lr[self.step_name]
@@ -222,11 +229,23 @@ class Trainer(Module):
         # elif self.current_epoch >= train_args["decay_border"]:
         #     current_lr = base_lr * train_args["decay_rate"] ** (self.current_epoch // decay_interval)
 
-        self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+        if update:
+            self.optimizer = optim.AdamW(filter(lambda p : p.requires_grad, self.video_net.parameters()), lr=current_lr)
+
+        if self.step_name == "contextual_coding":
+            if update:
+                print(f"init scheduler: {self.step_name}, iters = {len(dataloader)} * {(borders_of_steps[2] - borders_of_steps[1])}")
+                # iters = len(dataloader) * (borders_of_steps[3] - borders_of_steps[2]) / 2
+                iters = (borders_of_steps[3] - borders_of_steps[2]) / 2
+                self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=iters, eta_min=0)
+            else:
+                pass
+        else:
+            self.scheduler = None
 
         self.loss_items = train_args["loss_settings"][self.step_name]
 
-        print(f"step: {self.step}, step_name: {self.step_name}, current_lr: {current_lr}")
+        print(f"step: {self.step}, step_name: {self.step_name}, update: {update}, current_lr: {current_lr}")
         print(f"loss_items: {self.loss_items}")
             
     """ 
@@ -283,8 +302,8 @@ class Trainer(Module):
 
         output_p = self.video_net.forward(
             referframe=ref_image, input_image=input_image, 
-            quant_noise_feature=quant_noise_feature, quant_noise_z=quant_noise_z, 
-            quant_noise_mv=quant_noise_mv, quant_noise_z_mv=quant_noise_z_mv
+            # quant_noise_feature=quant_noise_feature, quant_noise_z=quant_noise_z, 
+            # quant_noise_mv=quant_noise_mv, quant_noise_z_mv=quant_noise_z_mv
             )
 
         loss = self.loss(output_p, input_image)
@@ -396,6 +415,8 @@ if __name__ == "__main__":
         trainer.current_epoch = epoch
         with torch.no_grad():
             trainer.schedule()
+
+        print(f"Epoch {epoch}, {trainer.step_name}, lr: {trainer.optimizer.param_groups[0]['lr']}")
         # cnt = 0
         # t_losses = 0
         # t_qualities = 0
@@ -420,6 +441,10 @@ if __name__ == "__main__":
 
         # save model
         torch.save(trainer.video_net.state_dict(), os.path.join(save_folder, f"model_epoch_{epoch}.pth"))
+
+        if trainer.scheduler is not None:
+            trainer.scheduler.step()
+
 
         # 验证
         idx = 0

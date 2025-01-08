@@ -28,7 +28,7 @@ tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': f"[25.1.4] [{tag}] 继承 genial-valley-117 （_exp_init）",
+    'describe': f"[25.1.7] [{tag}] 继承 genial-valley-117 （_exp_init）",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar", 
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
