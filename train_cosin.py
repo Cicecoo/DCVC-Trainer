@@ -28,7 +28,7 @@ tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': f"[25.1.8] [{tag}] ME 部分已经比较好，问题还在 bpp_z；排除初始化的问题；添加余弦退火",
+    'describe': f"[25.1.8] [{tag}] old：ME 部分已经比较好，问题还在 bpp_z；排除初始化的问题；添加余弦退火；new：再次训练",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar",
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -47,7 +47,7 @@ train_args = {
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
     "epochs": 25,
-    "seed": 19,
+    "seed": 428571,
     "border_of_steps": [1, 4, 7, 13, 19], # [1, 4, 7, 10, 16],
     "lr_set": {
         "me1": 1e-4,
