@@ -23,7 +23,7 @@ from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, g
 import random
 
 # set CUDA_VISIBLE_DEVICES=
-train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/mini_dvc_test_val_1k.txt' # test.txt' # 
+train_dataset_path = '/mnt/data3/zhaojunzhang/vimeo_septuplet/test.txt' # mini_dvc_test_val_1k.txt' # 
 tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
