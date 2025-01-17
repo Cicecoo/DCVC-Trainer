@@ -46,8 +46,8 @@ train_args = {
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
     "gop": 10,
-    "epochs": 25,
-    "seed": 428571,
+    "epochs": 30,
+    "seed": 142857,
     "border_of_steps": [1, 4, 7, 13, 19], # [1, 4, 7, 10, 16],
     "lr_set": {
         "me1": 1e-4,
