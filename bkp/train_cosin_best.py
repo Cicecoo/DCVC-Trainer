@@ -28,7 +28,7 @@ tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': f"[25.1.8] [{tag}] 增大lambda对齐官方",
+    'describe': f"[25.1.8] [{tag}] old：ME 部分已经比较好，问题还在 bpp_z；排除初始化的问题；添加余弦退火；new：再次训练",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar",
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -45,7 +45,6 @@ train_args = {
     "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
-    "lambda": 272,
     "gop": 10,
     "epochs": 30,
     "seed": 428571,
@@ -285,8 +284,7 @@ class Trainer(Module):
         # print("bpp_y", net_output["bpp_y"])
         # print("bpp_z", net_output["bpp_z"])
 
-        # loss = lambda_set[self.metric][self.quality_index] * D_item + R_item
-        loss = train_args["lambda"] * D_item + R_item
+        loss = lambda_set[self.metric][self.quality_index] * D_item + R_item
         return loss
 
     def training_step(self, batch, batch_idx):
