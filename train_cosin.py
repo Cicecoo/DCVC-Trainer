@@ -28,7 +28,7 @@ tag = 'test' if train_dataset_path.__contains__('mini') else 'main'
 
 train_args = {
     'project': "DCVC-Trainer_remote",
-    'describe': f"[25.1.8] [{tag}] 增大lambda对齐官方",
+    'describe': f"[25.2.12] [{tag}] 增大lambda对齐官方结果，但多次出现step3 bpp_z降至e-6",
     'i_frame_model_name': "cheng2020-anchor",
     'i_frame_model_path': ["checkpoints/cheng2020-anchor-3-e49be189.pth.tar",
                            "checkpoints/cheng2020-anchor-4-98b0b468.pth.tar",
@@ -48,7 +48,7 @@ train_args = {
     "lambda": 272,
     "gop": 10,
     "epochs": 30,
-    "seed": 428571,
+    "seed": 142857,
     "border_of_steps": [1, 4, 7, 13, 19], # [1, 4, 7, 10, 16],
     "lr_set": {
         "me1": 1e-4,
@@ -102,20 +102,20 @@ if train_args["decay_border"] is not None:
     decay_interval = train_args["epochs"] - train_args["decay_border"]
 
 # 此处 index 对应文中 quality index，lambda来自于文中3.4及附录
-lambda_set = {
-    "MSE": { # 对应psnr
-        3: 256, 
-        4: 512, 
-        5: 1024, 
-        6: 2048
-    },
-    "MS-SSIM": {
-        3: 8, 
-        4: 16, 
-        5: 32, 
-        6: 64
-    }
-}
+# lambda_set = {
+#     "MSE": { # 对应psnr
+#         3: 256, 
+#         4: 512, 
+#         5: 1024, 
+#         6: 2048
+#     },
+#     "MS-SSIM": {
+#         3: 8, 
+#         4: 16, 
+#         5: 32, 
+#         6: 64
+#     }
+# }
 
 
 class Trainer(Module):
@@ -235,9 +235,9 @@ class Trainer(Module):
 
         if self.step_name == "contextual_coding":
             if update:
-                print(f"init scheduler: {self.step_name}, iters = {len(dataloader)} * {(borders_of_steps[2] - borders_of_steps[1])}")
                 # iters = len(dataloader) * (borders_of_steps[3] - borders_of_steps[2]) / 2
                 iters = (borders_of_steps[3] - borders_of_steps[2]) / 2
+                print(f"init scheduler: {self.step_name}, iters = {borders_of_steps[3]} - {borders_of_steps[2]} / 2")
                 self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=iters, eta_min=0)
             else:
                 pass
