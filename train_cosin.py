@@ -45,7 +45,7 @@ train_args = {
     "batch_size": 4,
     "metric": "MSE", # 最小化 MSE 来最大化 PSNR
     "quality": 3,   # in [3、4、5、6]
-    "lambda": 272,
+    "lambda": 292,
     "gop": 10,
     "epochs": 30,
     "seed": 142857,
