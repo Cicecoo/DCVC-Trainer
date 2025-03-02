@@ -48,8 +48,8 @@ train_args = {
     "lambda": 292,
     "gop": 10,
     "epochs": 30,
-    "seed": 142857,
-    "border_of_steps": [1, 4, 7, 13, 19], # [1, 4, 7, 10, 16],
+    "seed": 192,
+    "border_of_steps": [1, 4, 8, 14, 20], # [1, 4, 7, 10, 16],
     "lr_set": {
         "me1": 1e-4,
         "me2": 1e-4,

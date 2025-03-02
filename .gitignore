@@ -12,7 +12,8 @@ wandb/
 
 
 make_graph.py
-# test_video.py
+test_video.py
+show_cuda_device.py
 
 recon*
 dataset_config.json
@@ -24,3 +25,5 @@ datasetHEM.py
 datasetVimeo.py
 
 .vscode/
+
+bkp/
