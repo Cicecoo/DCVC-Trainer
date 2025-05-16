@@ -2,7 +2,26 @@ import os
 import random
 import torch
 import torch.nn.functional as F
-import cv2
+# import cv2
+from pytorch_msssim import ms_ssim
+import numpy as np
+from PIL import Image
+
+
+# PSNR: peak signal-to-noise ratio 峰值信噪比
+def PSNR(input1, input2):
+    mse = torch.mean((input1 - input2) ** 2) # 均方误差
+    psnr = 20 * torch.log10(1 / torch.sqrt(mse)) # 10 * log10(max^2/mse) = 20 * log10(max/sqrt(mse)), normalized: max = 1
+    return psnr.item()
+
+
+def read_frame_to_torch(path):
+    input_image = Image.open(path).convert('RGB')
+    input_image = np.asarray(input_image).astype('float64').transpose(2, 0, 1) # 读图默认 HWC，转为 CHW
+    input_image = torch.from_numpy(input_image).type(torch.FloatTensor)
+    input_image = input_image.unsqueeze(0)/255 # 归一化
+    return input_image
+
 
 def load_submodule_params(submodule, whole_module_checkpoint, submodule_name):
     submodule_params = submodule.state_dict()

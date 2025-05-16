@@ -10,7 +10,7 @@ import torch.utils.data as data
 # from DVC.subnet.basics import *
 # from DVC.subnet.ms_ssim_torch import ms_ssim
 from DVC.augmentation import random_flip, random_crop_and_pad_image_and_labels
-from test_video import PSNR, ms_ssim
+from utils import PSNR, ms_ssim
 
 # 以下参数来自 DCVC_net.py
 out_channel_mv = 128

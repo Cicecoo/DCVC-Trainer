@@ -10,7 +10,7 @@ from src.models.DCVC_net_add_noise import DCVC_net
 # from src.models.DCVC_net_quant import DCVC_net
 # from src.models.DCVC_net_Spynet import DCVC_net
 from src.zoo.image import model_architectures as architectures
-from test_video import PSNR, ms_ssim, read_frame_to_torch
+# from test_video import PSNR, ms_ssim, read_frame_to_torch
 from dvc_dataset import DataSet, RawDataSet, UVGDataSet
 from mmvc_dataset import VimeoDataset
 # from datasetVimeo import Vimeo90kDataset
@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
 from utils import load_submodule_params, freeze_submodule, unfreeze_submodule, get_save_folder, clip_gradient
+from utils import PSNR, ms_ssim, read_frame_to_torch
 import random
 
 # set CUDA_VISIBLE_DEVICES=
