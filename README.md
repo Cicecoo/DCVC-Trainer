@@ -2,7 +2,7 @@
 
 ## 结果
 
-目前只在 quality=1 (lambda=256) 配置下得到与[预训练权重](https://github.com/microsoft/DCVC?tab=readme-ov-file#clipboard-dcvc-family)接近的结果。
+目前只在 quality=0 (lambda=256) 配置下得到与[预训练权重](https://github.com/microsoft/DCVC?tab=readme-ov-file#clipboard-dcvc-family)接近的结果。
 
 |P frame 指标|DCVC-TCM single 策略<br>+余弦学习率|dcvc_quality_0_psnr<br> (λ = 256)|
 | --- | --- | --- |
@@ -13,6 +13,7 @@
 |bpp_z|0.00038|0.00102|
 |psnr|32.0844|32.9327|
 
+训练中 bpp_mv_z 偏低。
 
 ## 说明
 
