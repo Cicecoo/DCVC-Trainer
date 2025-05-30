@@ -41,7 +41,13 @@
 ### 数据集
 
 使用 [DVC](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/dataset.py) 的数据集配置。
-test.txt 来自[此处](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/data/vimeo_septuplet/test.txt)。
+训练集使用 test.txt，来自[此处](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/data/vimeo_septuplet/test.txt)。
+
+训练集
+[Vimeo-90k dataset](http://toflow.csail.mit.edu/) original training + test set (82GB) 
+
+测试集
+[UVG dataset](http://ultravideo.cs.tut.fi/#testsequences_x) 1080p/8bit/YUV/RAW
 
 ### 光流网络
 
