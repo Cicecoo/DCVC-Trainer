@@ -1,3 +1,5 @@
+
+
 # DCVC Trainer
 
 ## 结果
@@ -41,7 +43,7 @@
 ### 数据集
 
 使用 [DVC](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/dataset.py) 的数据集配置。
-训练集使用 test.txt，来自[此处](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/data/vimeo_septuplet/test.txt)。
+训练集使用 test.txt，来自[此处](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/data/vimeo_septuplet/test.txt)。`dvc_dataset.py` 中默认使用的列表文件为 `mini_dvc_test_10k.txt`。
 
 训练集
 [Vimeo-90k dataset](http://toflow.csail.mit.edu/) original training + test set (82GB) 
@@ -52,5 +54,3 @@
 ### 光流网络
 
 Spynet 预训练权重的加载同样参考 [DVC](https://github.com/ZhihaoHu/PyTorchVideoCompression/blob/master/DVC/subnet/endecoder.py#L313)，权重来自[此处](https://github.com/ZhihaoHu/PyTorchVideoCompression/tree/master/DVC/examples/flow_pretrain_np)。
-
-
